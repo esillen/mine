@@ -38,11 +38,12 @@ const gamepadState = {
   buildPressed: false,
   swapPressed: false,
   timePressed: false,
-  eatPressed: false,
+  dayNightPressed: false,
 };
 
 const enemies = [];
 const trees = [];
+const droppedApples = [];
 const groundCuts = [];
 const placedBlocks = [];
 const BLOCK_SIZE = 40;
@@ -53,6 +54,8 @@ let selectedMaterial = "wood";
 let gameOver = false;
 let frameCount = 0;
 let spawnedThisNight = false;
+let hardReloadInProgress = false;
+let autoDayNightEnabled = false;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -380,6 +383,19 @@ function drawTrees(cameraX, cameraY) {
   });
 }
 
+function drawDroppedApples(cameraX, cameraY) {
+  droppedApples.forEach((apple) => {
+    const ax = apple.x - cameraX;
+    const ay = apple.y - cameraY;
+    if (ax < -20 || ax > canvas.width + 20) return;
+
+    ctx.fillStyle = "#dc2626";
+    ctx.fillRect(ax - 4, ay - 4, 8, 8);
+    ctx.fillStyle = "#22c55e";
+    ctx.fillRect(ax - 1, ay - 6, 3, 2);
+  });
+}
+
 function drawPlayer(cameraX, cameraY) {
   const px = player.x - cameraX;
   const py = player.y - cameraY;
@@ -638,7 +654,7 @@ function drawHud() {
   const textColor = isNight() ? "#f8fafc" : "#111827";
 
   ctx.fillStyle = hudBg;
-  ctx.fillRect(8, 8, 560, 272);
+  ctx.fillRect(8, 8, 620, 304);
 
   ctx.fillStyle = textColor;
   ctx.font = "20px Trebuchet MS, sans-serif";
@@ -665,8 +681,9 @@ function drawHud() {
   ctx.fillText(`Jord: ${dirt}`, 16, 160);
   ctx.fillText(`Byggmaterial: ${selectedMaterial === "wood" ? "trä" : "jord"}`, 16, 186);
   ctx.fillText(`Bygg: B | Byt material: C`, 16, 212);
-  ctx.fillText(`Ät äpple: E nära träd`, 16, 238);
+  ctx.fillText(`Äpplen: fäll träd, gå över äpplet för heal`, 16, 238);
   ctx.fillText(`Kontroll: LS rörelse | A hoppa | X hugga | B bygg | Y byt`, 16, 264);
+  ctx.fillText(`Gamepad: Select dag/natt | Start reload`, 16, 290);
 
   if (gameOver) {
     ctx.fillStyle = "#f8fafc";
@@ -705,6 +722,18 @@ function updatePlayer() {
       const comingFromAbove = bottomY - player.vy <= block.y + 8;
       if (withinX && comingFromAbove) {
         surfaceY = Math.min(surfaceY, block.y);
+      }
+    });
+
+    trees.forEach((tree) => {
+      if (!tree.alive) return;
+      const crownTop = tree.y - tree.trunkH - tree.crownH + 10;
+      const crownLeft = tree.x - tree.crownW / 2;
+      const crownRight = tree.x + tree.crownW / 2;
+      const withinCrownX = centerX >= crownLeft + 4 && centerX <= crownRight - 4;
+      const comingFromAbove = bottomY - player.vy <= crownTop + 8;
+      if (withinCrownX && comingFromAbove) {
+        surfaceY = Math.min(surfaceY, crownTop);
       }
     });
   }
@@ -770,6 +799,52 @@ function updateGroundCuts() {
   }
 }
 
+function updateDroppedApples() {
+  const playerBox = { x: player.x, y: player.y, w: player.w, h: player.h };
+
+  for (let i = droppedApples.length - 1; i >= 0; i -= 1) {
+    const apple = droppedApples[i];
+
+    if (!apple.onGround) {
+      apple.x = clamp(apple.x + apple.vx, 0, world.width);
+      apple.y += apple.vy;
+      apple.vy += world.gravity * 0.6;
+      apple.vx *= 0.985;
+
+      const groundY = groundAt(apple.x) - 5;
+      if (apple.y >= groundY) {
+        apple.y = groundY;
+        apple.vy = 0;
+        apple.vx *= 0.6;
+        if (Math.abs(apple.vx) < 0.1) {
+          apple.vx = 0;
+          apple.onGround = true;
+        }
+      }
+    }
+
+    const appleBox = { x: apple.x - 5, y: apple.y - 5, w: 10, h: 10 };
+    if (intersects(playerBox, appleBox) && player.hp < MAX_PLAYER_HP) {
+      player.hp = Math.min(MAX_PLAYER_HP, player.hp + 1);
+      droppedApples.splice(i, 1);
+    }
+  }
+}
+
+function dropTreeApples(tree) {
+  const count = tree.apples || 0;
+  for (let i = 0; i < count; i += 1) {
+    droppedApples.push({
+      x: tree.x + (Math.random() - 0.5) * (tree.crownW * 0.7),
+      y: tree.y - tree.trunkH - tree.crownH * 0.4,
+      vx: (Math.random() - 0.5) * 3.4,
+      vy: -5.8 - Math.random() * 2.2,
+      onGround: false,
+    });
+  }
+  tree.apples = 0;
+}
+
 function tryChopTree(attackBox) {
   let chopped = false;
 
@@ -790,6 +865,7 @@ function tryChopTree(attackBox) {
     if (tree.hp <= 0) {
       tree.alive = false;
       wood += 3;
+      dropTreeApples(tree);
     }
   });
 
@@ -814,27 +890,6 @@ function tryDigGround(attackBox) {
   }
 
   return true;
-}
-
-function tryEatAppleNearPlayer() {
-  if (player.hp >= MAX_PLAYER_HP) return false;
-
-  const playerCenterX = player.x + player.w / 2;
-  const playerCenterY = player.y + player.h / 2;
-
-  for (const tree of trees) {
-    if (!tree.alive || tree.apples <= 0) continue;
-    const treeCenterY = tree.y - tree.trunkH / 2;
-    const closeX = Math.abs(tree.x - playerCenterX) <= 110;
-    const closeY = Math.abs(treeCenterY - playerCenterY) <= 140;
-    if (!closeX || !closeY) continue;
-
-    tree.apples -= 1;
-    player.hp = Math.min(MAX_PLAYER_HP, player.hp + 1);
-    return true;
-  }
-
-  return false;
 }
 
 function tryBreakPlacedBlock(attackBox) {
@@ -958,6 +1013,29 @@ function toggleDayNight() {
   updateTimeToggleButton();
 }
 
+async function hardReloadPage() {
+  if (hardReloadInProgress) return;
+  hardReloadInProgress = true;
+
+  try {
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    }
+
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((reg) => reg.unregister()));
+    }
+  } catch (_error) {
+    // Ignore cache cleanup errors and still reload.
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.set("_r", Date.now().toString());
+  window.location.replace(url.toString());
+}
+
 function handleGamepadInput() {
   const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
   const pad = gamepads && gamepads[0];
@@ -971,37 +1049,41 @@ function handleGamepadInput() {
   const buildNow = !!pad.buttons[1]?.pressed; // B / Circle
   const attackNow = !!pad.buttons[2]?.pressed; // X / Square
   const swapNow = !!pad.buttons[3]?.pressed; // Y / Triangle
-  const eatNow = !!pad.buttons[5]?.pressed; // RB / R1
+  const dayNightNow = !!pad.buttons[8]?.pressed; // Select / Share
   const timeNow = !!pad.buttons[9]?.pressed; // Start / Options
 
   if (jumpNow && !gamepadState.jumpPressed) jump();
   if (attackNow && !gamepadState.attackPressed) attack();
   if (buildNow && !gamepadState.buildPressed) placeBlock();
   if (swapNow && !gamepadState.swapPressed) toggleBuildMaterial();
-  if (eatNow && !gamepadState.eatPressed) tryEatAppleNearPlayer();
-  if (timeNow && !gamepadState.timePressed) toggleDayNight();
+  if (dayNightNow && !gamepadState.dayNightPressed) toggleDayNight();
+  if (timeNow && !gamepadState.timePressed) hardReloadPage();
 
   gamepadState.jumpPressed = jumpNow;
   gamepadState.attackPressed = attackNow;
   gamepadState.buildPressed = buildNow;
   gamepadState.swapPressed = swapNow;
-  gamepadState.eatPressed = eatNow;
+  gamepadState.dayNightPressed = dayNightNow;
   gamepadState.timePressed = timeNow;
 }
 
 function gameLoop() {
-  frameCount += 1;
+  if (autoDayNightEnabled) {
+    frameCount += 1;
+  }
   handleGamepadInput();
   updateDayNightAndSpawns();
   updateTimeToggleButton();
   updatePlayer();
   updateEnemies();
   updateGroundCuts();
+  updateDroppedApples();
   updateCamera();
 
   drawBackground(camera.x, camera.y);
   drawPlacedBlocks(camera.x, camera.y);
   drawTrees(camera.x, camera.y);
+  drawDroppedApples(camera.x, camera.y);
   drawPlayer(camera.x, camera.y);
   drawEnemies(camera.x, camera.y);
   drawHud();
@@ -1021,7 +1103,6 @@ window.addEventListener("keydown", (event) => {
   if (event.code === "KeyX") attack();
   if (event.code === "KeyC") toggleBuildMaterial();
   if (event.code === "KeyB") placeBlock();
-  if (event.code === "KeyE") tryEatAppleNearPlayer();
 });
 
 window.addEventListener("keyup", (event) => {
