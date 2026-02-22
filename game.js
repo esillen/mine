@@ -86,6 +86,7 @@ const groundCuts = [];
 const terrainPits = [];
 const groundParticles = [];
 const pitCellIndex = new Map();
+const dugColumns = new Map();
 const placedBlocks = [];
 const BLOCK_SIZE = 40;
 let defeated = 0;
@@ -121,34 +122,15 @@ const ui = createUIController({
 
 function rebuildPitCellIndex() {
   pitCellIndex.clear();
-  for (const pit of terrainPits) {
-    const start = Math.floor((pit.x - pit.radius) / PIT_CELL_SIZE);
-    const end = Math.floor((pit.x + pit.radius) / PIT_CELL_SIZE);
-    for (let cell = start; cell <= end; cell += 1) {
-      if (!pitCellIndex.has(cell)) pitCellIndex.set(cell, []);
-      pitCellIndex.get(cell).push(pit);
-    }
-  }
+}
+
+function worldToTerrainCol(worldX) {
+  return Math.floor(clamp(worldX, 0, world.width) / TERRAIN_BLOCK_SIZE);
 }
 
 function getTerrainDigDepth(worldX) {
-  if (terrainPits.length === 0) return 0;
-
-  let depth = 0;
-  const cell = Math.floor(worldX / PIT_CELL_SIZE);
-  const candidates = [];
-  for (let i = cell - 1; i <= cell + 1; i += 1) {
-    const bucket = pitCellIndex.get(i);
-    if (bucket) candidates.push(...bucket);
-  }
-
-  for (const pit of candidates) {
-    const dx = Math.abs(worldX - pit.x);
-    if (dx > pit.radius) continue;
-    const t = 1 - dx / pit.radius;
-    depth += t * t * pit.depth;
-  }
-  return Math.min(depth, 90);
+  const col = worldToTerrainCol(worldX);
+  return (dugColumns.get(col) || 0) * TERRAIN_BLOCK_SIZE;
 }
 
 function groundAt(worldX) {
@@ -404,6 +386,7 @@ function drawBackground(cameraX, cameraY) {
 
   drawBirds(cameraX);
   drawTerrain(cameraX, cameraY);
+  drawUndergroundVision(cameraX, cameraY);
 }
 
 function drawBirds(cameraX) {
@@ -442,6 +425,12 @@ function drawTerrain(cameraX, cameraY) {
       ctx.fillStyle = checker ? bodyA : bodyB;
       ctx.fillRect(sx, y, TERRAIN_BLOCK_SIZE, TERRAIN_BLOCK_SIZE);
     }
+
+    ctx.strokeStyle = isNight() ? "rgba(15, 23, 42, 0.35)" : "rgba(30, 64, 45, 0.28)";
+    ctx.lineWidth = 1;
+    for (let y = topBlockY; y < canvas.height; y += TERRAIN_BLOCK_SIZE) {
+      ctx.strokeRect(sx, y, TERRAIN_BLOCK_SIZE, TERRAIN_BLOCK_SIZE);
+    }
   }
 
   drawGroundCuts(cameraX, cameraY);
@@ -467,6 +456,55 @@ function drawGroundCuts(cameraX, cameraY) {
     if (sx + cut.size < -20 || sx > canvas.width + 20) return;
     const sy = groundAt(cut.x) - cameraY - 2;
     ctx.fillRect(sx, sy, cut.size, 6);
+  });
+}
+
+function drawUndergroundVision(cameraX, cameraY) {
+  // X-ray overlay: show hidden dig sites and treasures under the ground.
+  buriedSites.forEach((site) => {
+    if (site.revealed) return;
+    const sx = site.x - cameraX;
+    if (sx < -30 || sx > canvas.width + 30) return;
+
+    const surfaceY = groundAt(site.x) - cameraY;
+    const depthY = surfaceY + TERRAIN_BLOCK_SIZE * 2.8;
+
+    ctx.strokeStyle = "rgba(125, 211, 252, 0.45)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    ctx.moveTo(sx, surfaceY);
+    ctx.lineTo(sx, depthY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = "rgba(56, 189, 248, 0.22)";
+    ctx.fillRect(sx - 9, depthY - 9, 18, 18);
+    ctx.strokeStyle = "rgba(125, 211, 252, 0.7)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(sx - 9, depthY - 9, 18, 18);
+  });
+
+  buriedTreasures.forEach((treasure) => {
+    if (treasure.collected) return;
+    const tx = treasure.x - cameraX;
+    if (tx < -30 || tx > canvas.width + 30) return;
+
+    const ty = treasure.y - cameraY;
+    const surfaceY = groundAt(treasure.x) - cameraY;
+    if (ty <= surfaceY) return;
+
+    ctx.strokeStyle = "rgba(244, 244, 245, 0.34)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(tx, surfaceY);
+    ctx.lineTo(tx, ty - 6);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(250, 204, 21, 0.24)";
+    ctx.fillRect(tx - 7, ty - 7, 14, 14);
+    ctx.strokeStyle = "rgba(250, 204, 21, 0.8)";
+    ctx.strokeRect(tx - 7, ty - 7, 14, 14);
   });
 }
 
@@ -1036,16 +1074,9 @@ function updateGroundParticles() {
 }
 
 function digTerrainAt(worldX) {
-  const x = clamp(worldX, 0, world.width);
-  const existing = terrainPits.find((pit) => Math.abs(pit.x - x) <= 24);
-  if (existing) {
-    existing.depth = Math.min(existing.depth + 4.2, 40);
-    existing.radius = Math.min(existing.radius + 2, 66);
-  } else {
-    terrainPits.push({ x, radius: 44, depth: 10 });
-    if (terrainPits.length > PERF.maxTerrainPits) terrainPits.shift();
-  }
-  rebuildPitCellIndex();
+  const col = worldToTerrainCol(worldX);
+  const current = dugColumns.get(col) || 0;
+  dugColumns.set(col, Math.min(current + 1, 16));
 }
 
 function spawnGroundParticles(worldX, worldY) {
@@ -1118,12 +1149,12 @@ function revealBuriedSite(site) {
 
   for (let i = 0; i < count; i += 1) {
     const px = start + i * step;
-    const depth = 16 + Math.sin(i * 0.85) * 10 + (i % 2 === 0 ? 5 : 0);
-    terrainPits.push({
-      x: clamp(px, 0, world.width),
-      radius: 52,
-      depth: 22 + depth,
-    });
+    const col = worldToTerrainCol(px);
+    const extra = 2 + Math.floor(Math.abs(Math.sin(i * 0.85)) * 3) + (i % 2 === 0 ? 1 : 0);
+    const current = dugColumns.get(col) || 0;
+    dugColumns.set(col, Math.min(current + extra, 14));
+    dugColumns.set(col - 1, Math.min((dugColumns.get(col - 1) || 0) + 1, 12));
+    dugColumns.set(col + 1, Math.min((dugColumns.get(col + 1) || 0) + 1, 12));
   }
 
   const treasureTypes = ["emerald", "nyx", "amethyst", "cache"];
@@ -1135,9 +1166,6 @@ function revealBuriedSite(site) {
     spawnBuriedTreasure(type, clamp(tx, 0, world.width), depthOffset);
   }
 
-  if (terrainPits.length > PERF.maxTerrainPits) {
-    terrainPits.splice(0, terrainPits.length - PERF.maxTerrainPits);
-  }
   rebuildPitCellIndex();
 }
 
