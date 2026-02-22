@@ -29,6 +29,7 @@ const PERF = {
   birdCount: 10,
 };
 const PIT_CELL_SIZE = 140;
+const TERRAIN_BLOCK_SIZE = 24;
 
 const player = {
   x: 120,
@@ -46,9 +47,23 @@ const player = {
   hitCooldown: 0,
 };
 
+const dog = {
+  x: 80,
+  y: 0,
+  w: 30,
+  h: 22,
+  vx: 0,
+  speed: 2.6,
+  facing: 1,
+  bouncePhase: 0,
+  targetSide: 1,
+};
+
 const keys = {
   left: false,
   right: false,
+  up: false,
+  down: false,
 };
 
 const gamepadState = {
@@ -142,7 +157,8 @@ function groundAt(worldX) {
   const mountains = Math.sin(x * 0.0019 + 0.6) * 110;
   const valleys = Math.sin(x * 0.009 + 1.3) * 26;
   const dugDepth = getTerrainDigDepth(x);
-  return world.baseGround + hills + mountains + valleys + dugDepth;
+  const height = world.baseGround + hills + mountains + valleys + dugDepth;
+  return Math.floor(height / TERRAIN_BLOCK_SIZE) * TERRAIN_BLOCK_SIZE;
 }
 
 function getDayPhase() {
@@ -207,6 +223,7 @@ function resizeCanvas() {
   camera.maxY = canvas.height * 0.65;
 
   player.y = groundAt(player.x + player.w / 2) - player.h;
+  dog.y = groundAt(dog.x + dog.w / 2) - dog.h;
   enemies.forEach((enemy) => {
     enemy.y = groundAt(enemy.x + enemy.w / 2) - enemy.h;
   });
@@ -408,25 +425,23 @@ function drawBirds(cameraX) {
 }
 
 function drawTerrain(cameraX, cameraY) {
-  ctx.fillStyle = isNight() ? "#1f3d24" : "#3f8746";
-  ctx.beginPath();
-  ctx.moveTo(0, canvas.height);
+  const topColor = isNight() ? "#2d5c34" : "#5ca45f";
+  const bodyA = isNight() ? "#1f3d24" : "#3f8746";
+  const bodyB = isNight() ? "#25452a" : "#4a9250";
 
-  for (let sx = 0; sx <= canvas.width; sx += PERF.terrainStep) {
+  for (let sx = -TERRAIN_BLOCK_SIZE; sx <= canvas.width + TERRAIN_BLOCK_SIZE; sx += TERRAIN_BLOCK_SIZE) {
     const wx = cameraX + sx;
     const gy = groundAt(wx) - cameraY;
-    ctx.lineTo(sx, gy);
-  }
+    const topBlockY = Math.floor(gy / TERRAIN_BLOCK_SIZE) * TERRAIN_BLOCK_SIZE;
 
-  ctx.lineTo(canvas.width, canvas.height);
-  ctx.closePath();
-  ctx.fill();
+    ctx.fillStyle = topColor;
+    ctx.fillRect(sx, topBlockY, TERRAIN_BLOCK_SIZE, TERRAIN_BLOCK_SIZE);
 
-  ctx.fillStyle = isNight() ? "#2d5c34" : "#5ca45f";
-  for (let sx = 0; sx <= canvas.width; sx += PERF.grassStep) {
-    const wx = cameraX + sx;
-    const gy = groundAt(wx) - cameraY;
-    ctx.fillRect(sx, gy - 3, 12, 3);
+    for (let y = topBlockY + TERRAIN_BLOCK_SIZE; y < canvas.height; y += TERRAIN_BLOCK_SIZE) {
+      const checker = ((sx / TERRAIN_BLOCK_SIZE + y / TERRAIN_BLOCK_SIZE) & 1) === 0;
+      ctx.fillStyle = checker ? bodyA : bodyB;
+      ctx.fillRect(sx, y, TERRAIN_BLOCK_SIZE, TERRAIN_BLOCK_SIZE);
+    }
   }
 
   drawGroundCuts(cameraX, cameraY);
@@ -552,6 +567,36 @@ function drawDroppedApples(cameraX, cameraY) {
     ctx.fillStyle = "#22c55e";
     ctx.fillRect(ax - 1, ay - 6, 3, 2);
   });
+}
+
+function drawDog(cameraX, cameraY) {
+  const dx = dog.x - cameraX;
+  const dy = dog.y - cameraY + Math.sin(dog.bouncePhase) * 1.8;
+  const tailWag = Math.sin(frameCount * 0.45) * 2;
+
+  ctx.fillStyle = "#b45309";
+  ctx.fillRect(dx, dy + 6, dog.w, dog.h - 6); // body
+  ctx.fillStyle = "#fbbf24";
+  ctx.fillRect(dx + dog.w - 8, dy + 2, 12, 12); // head
+
+  const eyeX = dog.facing > 0 ? dx + dog.w + 1 : dx + dog.w - 2;
+  ctx.fillStyle = "#111827";
+  ctx.fillRect(eyeX, dy + 6, 2, 2);
+
+  ctx.fillStyle = "#92400e";
+  const tailX = dog.facing > 0 ? dx - 4 : dx + dog.w + 2;
+  ctx.fillRect(tailX, dy + 8 + tailWag, 4, 8);
+
+  // legs
+  ctx.fillStyle = "#7c2d12";
+  ctx.fillRect(dx + 4, dy + dog.h - 4, 4, 6);
+  ctx.fillRect(dx + 12, dy + dog.h - 4, 4, 6);
+  ctx.fillRect(dx + 20, dy + dog.h - 4, 4, 6);
+  ctx.fillRect(dx + 27, dy + dog.h - 4, 4, 6);
+
+  // smile
+  ctx.fillStyle = "#78350f";
+  ctx.fillRect(dx + dog.w - 2, dy + 10, 4, 2);
 }
 
 function drawBuriedTreasures(cameraX, cameraY) {
@@ -901,6 +946,22 @@ function updatePlayer() {
   if (player.hitCooldown > 0) player.hitCooldown -= 1;
 }
 
+function updateDog() {
+  const desiredOffset = dog.targetSide * 58;
+  const targetX = clamp(player.x + desiredOffset, 0, world.width - dog.w);
+  const dist = targetX - dog.x;
+
+  if (Math.abs(dist) < 6) {
+    dog.targetSide = player.facing > 0 ? -1 : 1;
+  }
+
+  dog.vx = clamp(dist * 0.12, -dog.speed, dog.speed);
+  dog.x = clamp(dog.x + dog.vx, 0, world.width - dog.w);
+  dog.facing = dog.vx >= 0 ? 1 : -1;
+  dog.y = groundAt(dog.x + dog.w / 2) - dog.h;
+  dog.bouncePhase += Math.abs(dog.vx) * 0.18 + 0.08;
+}
+
 function updateEnemies() {
   if (gameOver) return;
 
@@ -1181,7 +1242,7 @@ function tryChopTree(attackBox) {
 }
 
 function tryDigGround(attackBox) {
-  const attackX = player.facing > 0 ? attackBox.x + attackBox.w : attackBox.x;
+  const attackX = attackBox.x + attackBox.w / 2;
   const groundYBeforeDig = groundAt(attackX);
   const isCloseToGround = attackBox.y + attackBox.h >= groundYBeforeDig - 10;
   if (!isCloseToGround) return false;
@@ -1226,12 +1287,32 @@ function attack() {
   if (gameOver || player.attackTimer > 0) return;
 
   player.attackTimer = 12;
-  const attackBox = {
-    x: player.facing > 0 ? player.x + player.w : player.x - 28,
-    y: player.y + 15,
-    w: 28,
-    h: 18,
-  };
+  const centerX = player.x + player.w / 2;
+  const attackDirection = keys.down ? "down" : keys.up ? "up" : "forward";
+  let attackBox;
+
+  if (attackDirection === "up") {
+    attackBox = {
+      x: centerX - 14,
+      y: player.y - 26,
+      w: 28,
+      h: 24,
+    };
+  } else if (attackDirection === "down") {
+    attackBox = {
+      x: centerX - 14,
+      y: player.y + player.h,
+      w: 28,
+      h: 24,
+    };
+  } else {
+    attackBox = {
+      x: player.facing > 0 ? player.x + player.w : player.x - 28,
+      y: player.y + 15,
+      w: 28,
+      h: 18,
+    };
+  }
 
   enemies.forEach((enemy) => {
     if (!enemy.alive) return;
@@ -1367,8 +1448,11 @@ function handleGamepadInput() {
   if (!pad) return;
 
   const horizontal = pad.axes[0] || 0;
+  const vertical = pad.axes[1] || 0;
   keys.left = horizontal < -0.25;
   keys.right = horizontal > 0.25;
+  keys.up = vertical < -0.35;
+  keys.down = vertical > 0.35;
 
   const jumpNow = !!pad.buttons[0]?.pressed; // A / Cross
   const buildNow = !!pad.buttons[1]?.pressed; // B / Circle
@@ -1403,6 +1487,7 @@ function gameLoop() {
   updateDayNightAndSpawns();
   updateTimeToggleButton();
   updatePlayer();
+  updateDog();
   updateEnemies();
   updateGroundCuts();
   updateGroundParticles();
@@ -1417,6 +1502,7 @@ function gameLoop() {
   drawTrees(camera.x, camera.y);
   drawDroppedApples(camera.x, camera.y);
   drawBuriedTreasures(camera.x, camera.y);
+  drawDog(camera.x, camera.y);
   drawPlayer(camera.x, camera.y);
   drawEnemies(camera.x, camera.y);
   drawHud();
@@ -1433,6 +1519,8 @@ function gameLoop() {
 window.addEventListener("keydown", (event) => {
   if (event.code === "ArrowLeft") keys.left = true;
   if (event.code === "ArrowRight") keys.right = true;
+  if (event.code === "ArrowUp") keys.up = true;
+  if (event.code === "ArrowDown") keys.down = true;
 
   if (event.code === "Space") {
     event.preventDefault();
@@ -1447,6 +1535,8 @@ window.addEventListener("keydown", (event) => {
 window.addEventListener("keyup", (event) => {
   if (event.code === "ArrowLeft") keys.left = false;
   if (event.code === "ArrowRight") keys.right = false;
+  if (event.code === "ArrowUp") keys.up = false;
+  if (event.code === "ArrowDown") keys.down = false;
 });
 
 if (timeToggleButton) {
