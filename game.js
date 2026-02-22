@@ -634,8 +634,13 @@ function drawEnemies(cameraX, cameraY) {
 function drawHud() {
   const remaining = enemies.filter((enemy) => enemy.alive).length;
   const phaseText = isNight() ? "Natt" : "Dag";
+  const hudBg = isNight() ? "rgba(15, 23, 42, 0.72)" : "rgba(255, 255, 255, 0.72)";
+  const textColor = isNight() ? "#f8fafc" : "#111827";
 
-  ctx.fillStyle = "#111827";
+  ctx.fillStyle = hudBg;
+  ctx.fillRect(8, 8, 560, 272);
+
+  ctx.fillStyle = textColor;
   ctx.font = "20px Trebuchet MS, sans-serif";
   ctx.fillText("Liv:", 16, 30);
   const heartStartX = 62;
@@ -645,7 +650,7 @@ function drawHud() {
     const hx = heartStartX + i * (heartSize + 4);
     const hy = heartY;
     const filled = i < Math.max(0, player.hp);
-    const color = filled ? "#ef4444" : "#d1d5db";
+    const color = filled ? "#ef4444" : isNight() ? "#6b7280" : "#d1d5db";
     ctx.fillStyle = color;
     ctx.fillRect(hx + 2, hy, 4, 4);
     ctx.fillRect(hx + 8, hy, 4, 4);
@@ -664,8 +669,11 @@ function drawHud() {
   ctx.fillText(`Kontroll: LS rörelse | A hoppa | X hugga | B bygg | Y byt`, 16, 264);
 
   if (gameOver) {
-    ctx.fillStyle = "#111827";
+    ctx.fillStyle = "#f8fafc";
     ctx.font = "bold 44px Trebuchet MS, sans-serif";
+    ctx.strokeStyle = "#111827";
+    ctx.lineWidth = 4;
+    ctx.strokeText("Game Over", canvas.width / 2 - 120, canvas.height / 2);
     ctx.fillText("Game Over", canvas.width / 2 - 120, canvas.height / 2);
   }
 }
