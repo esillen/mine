@@ -772,6 +772,21 @@ function tryDigGround(attackBox) {
   return true;
 }
 
+function tryBreakPlacedBlock(attackBox) {
+  for (let i = placedBlocks.length - 1; i >= 0; i -= 1) {
+    const block = placedBlocks[i];
+    const blockBox = { x: block.x, y: block.y, w: block.size, h: block.size };
+    if (!intersects(attackBox, blockBox)) continue;
+
+    placedBlocks.splice(i, 1);
+    if (block.material === "wood") wood += 1;
+    else dirt += 1;
+    return true;
+  }
+
+  return false;
+}
+
 function attack() {
   if (gameOver || player.attackTimer > 0) return;
 
@@ -794,6 +809,9 @@ function attack() {
       }
     }
   });
+
+  const brokeBlock = tryBreakPlacedBlock(attackBox);
+  if (brokeBlock) return;
 
   const choppedTree = tryChopTree(attackBox);
   if (!choppedTree) {
