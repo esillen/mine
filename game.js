@@ -946,41 +946,40 @@ function toggleBuildMaterial() {
 function placeBlock() {
   if (gameOver) return;
 
-  const costResource = selectedMaterial === "wood" ? "wood" : "dirt";
-  if (costResource === "wood" && wood <= 0) return;
-  if (costResource === "dirt" && dirt <= 0) return;
-
-  const forwardCenterX =
+  const baseX =
     player.facing > 0
-      ? player.x + player.w + BLOCK_SIZE / 2
-      : player.x - BLOCK_SIZE / 2;
-  const nearFeetY = player.y + player.h - BLOCK_SIZE / 2;
-  const blockX = clamp(
-    Math.floor(forwardCenterX / BLOCK_SIZE) * BLOCK_SIZE,
+      ? player.x + player.w + BLOCK_SIZE * 0.35
+      : player.x - BLOCK_SIZE * 0.35;
+  const baseY = player.y + player.h * 0.5;
+  const snappedX = clamp(
+    Math.floor(baseX / BLOCK_SIZE) * BLOCK_SIZE,
     0,
     world.width - BLOCK_SIZE
   );
-  const blockY = Math.floor(nearFeetY / BLOCK_SIZE) * BLOCK_SIZE;
+  const snappedY = Math.floor(baseY / BLOCK_SIZE) * BLOCK_SIZE;
 
-  const candidate = {
-    x: blockX,
-    y: blockY,
-    size: BLOCK_SIZE,
-    material: selectedMaterial,
-  };
+  const candidates = [
+    { x: snappedX, y: snappedY },
+    { x: snappedX, y: snappedY - BLOCK_SIZE },
+    { x: snappedX, y: snappedY + BLOCK_SIZE },
+    { x: snappedX, y: snappedY - BLOCK_SIZE * 2 },
+    { x: snappedX, y: snappedY + BLOCK_SIZE * 2 },
+  ];
 
-  const playerBox = { x: player.x, y: player.y, w: player.w, h: player.h };
-  const blockBox = { x: candidate.x, y: candidate.y, w: candidate.size, h: candidate.size };
-  if (intersects(playerBox, blockBox)) return;
+  for (const pos of candidates) {
+    const overlapsExisting = placedBlocks.some(
+      (block) => block.x === pos.x && block.y === pos.y
+    );
+    if (overlapsExisting) continue;
 
-  const overlapsExisting = placedBlocks.some(
-    (block) => block.x === candidate.x && block.y === candidate.y
-  );
-  if (overlapsExisting) return;
-
-  placedBlocks.push(candidate);
-  if (costResource === "wood") wood -= 1;
-  else dirt -= 1;
+    placedBlocks.push({
+      x: pos.x,
+      y: pos.y,
+      size: BLOCK_SIZE,
+      material: selectedMaterial,
+    });
+    return;
+  }
 }
 
 function jump() {
