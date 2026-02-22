@@ -94,9 +94,47 @@ const MATERIAL_SLOT_CONFIG = [
 ];
 const BUILD_MATERIALS = MATERIAL_SLOT_CONFIG.filter((slot) => !slot.future).map((slot) => slot.key);
 const materialSlotRefs = new Map();
+const SAVE_KEY = "minecraft_like_build_v1";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function saveBuildState() {
+  try {
+    const payload = {
+      placedBlocks,
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
+  } catch (_error) {
+    // Ignore storage errors to avoid breaking gameplay.
+  }
+}
+
+function loadBuildState() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.placedBlocks)) return;
+
+    placedBlocks.length = 0;
+    for (const block of parsed.placedBlocks) {
+      if (!block || typeof block !== "object") continue;
+      if (typeof block.x !== "number" || typeof block.y !== "number") continue;
+      if (typeof block.size !== "number" || block.size <= 0) continue;
+      if (!BUILD_MATERIALS.includes(block.material)) continue;
+
+      placedBlocks.push({
+        x: clamp(block.x, 0, world.width - BLOCK_SIZE),
+        y: block.y,
+        size: BLOCK_SIZE,
+        material: block.material,
+      });
+    }
+  } catch (_error) {
+    // Ignore malformed saves.
+  }
 }
 
 function rebuildPitCellIndex() {
@@ -1229,6 +1267,7 @@ function tryBreakPlacedBlock(attackBox) {
     else if (block.material === "emerald") emerald += 1;
     else if (block.material === "nyx") nyx += 1;
     else if (block.material === "amethyst") amethyst += 1;
+    saveBuildState();
     return true;
   }
 
@@ -1316,6 +1355,7 @@ function placeBlock() {
       size: BLOCK_SIZE,
       material: selectedMaterial,
     });
+    saveBuildState();
     return;
   }
 }
@@ -1470,5 +1510,6 @@ window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 initializeTrees();
 initializeBuriedSites();
+loadBuildState();
 setupUI();
 gameLoop();
