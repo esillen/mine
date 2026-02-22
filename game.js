@@ -9,6 +9,8 @@ const world = {
   dayLengthFrames: 4200,
 };
 
+const MAX_PLAYER_HP = 8;
+
 const player = {
   x: 120,
   y: 0,
@@ -19,7 +21,7 @@ const player = {
   speed: 4.2,
   jumpForce: 13.5,
   onGround: false,
-  hp: 8,
+  hp: MAX_PLAYER_HP,
   facing: 1,
   attackTimer: 0,
   hitCooldown: 0,
@@ -36,6 +38,7 @@ const gamepadState = {
   buildPressed: false,
   swapPressed: false,
   timePressed: false,
+  eatPressed: false,
 };
 
 const enemies = [];
@@ -237,6 +240,7 @@ function initializeTrees() {
       crownW,
       crownH,
       hp: 3,
+      apples: 2 + (i % 3),
       alive: true,
     });
   }
@@ -357,6 +361,22 @@ function drawTrees(cameraX, cameraY) {
     ctx.fillRect(crownX, crownY, tree.crownW, tree.crownH);
     ctx.fillStyle = "#5fa95f";
     ctx.fillRect(crownX + 6, crownY + 6, tree.crownW - 12, tree.crownH - 12);
+
+    const appleSlots = [
+      { dx: -12, dy: 10 },
+      { dx: 0, dy: 16 },
+      { dx: 14, dy: 11 },
+      { dx: -4, dy: 23 },
+    ];
+    for (let i = 0; i < tree.apples; i += 1) {
+      const slot = appleSlots[i % appleSlots.length];
+      const ax = tree.x + slot.dx - cameraX;
+      const ay = crownY + slot.dy;
+      ctx.fillStyle = "#dc2626";
+      ctx.fillRect(ax, ay, 7, 7);
+      ctx.fillStyle = "#22c55e";
+      ctx.fillRect(ax + 2, ay - 2, 3, 2);
+    }
   });
 }
 
@@ -617,7 +637,22 @@ function drawHud() {
 
   ctx.fillStyle = "#111827";
   ctx.font = "20px Trebuchet MS, sans-serif";
-  ctx.fillText(`Liv: ${Math.max(0, player.hp)}`, 16, 30);
+  ctx.fillText("Liv:", 16, 30);
+  const heartStartX = 62;
+  const heartY = 16;
+  const heartSize = 14;
+  for (let i = 0; i < MAX_PLAYER_HP; i += 1) {
+    const hx = heartStartX + i * (heartSize + 4);
+    const hy = heartY;
+    const filled = i < Math.max(0, player.hp);
+    const color = filled ? "#ef4444" : "#d1d5db";
+    ctx.fillStyle = color;
+    ctx.fillRect(hx + 2, hy, 4, 4);
+    ctx.fillRect(hx + 8, hy, 4, 4);
+    ctx.fillRect(hx, hy + 4, 14, 4);
+    ctx.fillRect(hx + 2, hy + 8, 10, 4);
+    ctx.fillRect(hx + 4, hy + 12, 6, 4);
+  }
   ctx.fillText(`Nedkämpade fiender: ${defeated}`, 16, 56);
   ctx.fillText(`Kvar: ${remaining}`, 16, 82);
   ctx.fillText(`Fas: ${phaseText}`, 16, 108);
@@ -625,7 +660,8 @@ function drawHud() {
   ctx.fillText(`Jord: ${dirt}`, 16, 160);
   ctx.fillText(`Byggmaterial: ${selectedMaterial === "wood" ? "trä" : "jord"}`, 16, 186);
   ctx.fillText(`Bygg: B | Byt material: C`, 16, 212);
-  ctx.fillText(`Kontroll: LS rörelse | A hoppa | X hugga | B bygg | Y byt`, 16, 238);
+  ctx.fillText(`Ät äpple: E nära träd`, 16, 238);
+  ctx.fillText(`Kontroll: LS rörelse | A hoppa | X hugga | B bygg | Y byt`, 16, 264);
 
   if (gameOver) {
     ctx.fillStyle = "#111827";
@@ -772,6 +808,27 @@ function tryDigGround(attackBox) {
   return true;
 }
 
+function tryEatAppleNearPlayer() {
+  if (player.hp >= MAX_PLAYER_HP) return false;
+
+  const playerCenterX = player.x + player.w / 2;
+  const playerCenterY = player.y + player.h / 2;
+
+  for (const tree of trees) {
+    if (!tree.alive || tree.apples <= 0) continue;
+    const treeCenterY = tree.y - tree.trunkH / 2;
+    const closeX = Math.abs(tree.x - playerCenterX) <= 110;
+    const closeY = Math.abs(treeCenterY - playerCenterY) <= 140;
+    if (!closeX || !closeY) continue;
+
+    tree.apples -= 1;
+    player.hp = Math.min(MAX_PLAYER_HP, player.hp + 1);
+    return true;
+  }
+
+  return false;
+}
+
 function tryBreakPlacedBlock(attackBox) {
   for (let i = placedBlocks.length - 1; i >= 0; i -= 1) {
     const block = placedBlocks[i];
@@ -906,18 +963,21 @@ function handleGamepadInput() {
   const buildNow = !!pad.buttons[1]?.pressed; // B / Circle
   const attackNow = !!pad.buttons[2]?.pressed; // X / Square
   const swapNow = !!pad.buttons[3]?.pressed; // Y / Triangle
+  const eatNow = !!pad.buttons[5]?.pressed; // RB / R1
   const timeNow = !!pad.buttons[9]?.pressed; // Start / Options
 
   if (jumpNow && !gamepadState.jumpPressed) jump();
   if (attackNow && !gamepadState.attackPressed) attack();
   if (buildNow && !gamepadState.buildPressed) placeBlock();
   if (swapNow && !gamepadState.swapPressed) toggleBuildMaterial();
+  if (eatNow && !gamepadState.eatPressed) tryEatAppleNearPlayer();
   if (timeNow && !gamepadState.timePressed) toggleDayNight();
 
   gamepadState.jumpPressed = jumpNow;
   gamepadState.attackPressed = attackNow;
   gamepadState.buildPressed = buildNow;
   gamepadState.swapPressed = swapNow;
+  gamepadState.eatPressed = eatNow;
   gamepadState.timePressed = timeNow;
 }
 
@@ -953,6 +1013,7 @@ window.addEventListener("keydown", (event) => {
   if (event.code === "KeyX") attack();
   if (event.code === "KeyC") toggleBuildMaterial();
   if (event.code === "KeyB") placeBlock();
+  if (event.code === "KeyE") tryEatAppleNearPlayer();
 });
 
 window.addEventListener("keyup", (event) => {
