@@ -29,7 +29,6 @@ const PERF = {
   birdCount: 10,
 };
 const PIT_CELL_SIZE = 140;
-const TERRAIN_BLOCK_SIZE = 24;
 
 const player = {
   x: 120,
@@ -126,12 +125,12 @@ function rebuildPitCellIndex() {
 }
 
 function worldToTerrainCol(worldX) {
-  return Math.floor(clamp(worldX, 0, world.width) / TERRAIN_BLOCK_SIZE);
+  return Math.floor(clamp(worldX, 0, world.width) / BLOCK_SIZE);
 }
 
 function getTerrainDigDepth(worldX) {
   const col = worldToTerrainCol(worldX);
-  return (dugColumns.get(col) || 0) * TERRAIN_BLOCK_SIZE;
+  return (dugColumns.get(col) || 0) * BLOCK_SIZE;
 }
 
 function groundAt(worldX) {
@@ -141,7 +140,7 @@ function groundAt(worldX) {
   const valleys = Math.sin(x * 0.009 + 1.3) * 26;
   const dugDepth = getTerrainDigDepth(x);
   const height = world.baseGround + hills + mountains + valleys + dugDepth;
-  return Math.floor(height / TERRAIN_BLOCK_SIZE) * TERRAIN_BLOCK_SIZE;
+  return Math.floor(height / BLOCK_SIZE) * BLOCK_SIZE;
 }
 
 function getDayPhase() {
@@ -413,24 +412,27 @@ function drawTerrain(cameraX, cameraY) {
   const bodyA = isNight() ? "#1f3d24" : "#3f8746";
   const bodyB = isNight() ? "#25452a" : "#4a9250";
 
-  for (let sx = -TERRAIN_BLOCK_SIZE; sx <= canvas.width + TERRAIN_BLOCK_SIZE; sx += TERRAIN_BLOCK_SIZE) {
-    const wx = cameraX + sx;
-    const gy = groundAt(wx) - cameraY;
-    const topBlockY = Math.floor(gy / TERRAIN_BLOCK_SIZE) * TERRAIN_BLOCK_SIZE;
+  const startWX = Math.floor(cameraX / BLOCK_SIZE) * BLOCK_SIZE - BLOCK_SIZE;
+  const endWX = cameraX + canvas.width + BLOCK_SIZE;
 
+  for (let wx = startWX; wx <= endWX; wx += BLOCK_SIZE) {
+    const sx = Math.floor(wx - cameraX);
+    const topBlockY = Math.floor(groundAt(wx) - cameraY);
     ctx.fillStyle = topColor;
-    ctx.fillRect(sx, topBlockY, TERRAIN_BLOCK_SIZE, TERRAIN_BLOCK_SIZE);
+    ctx.fillRect(sx, topBlockY, BLOCK_SIZE, BLOCK_SIZE);
 
-    for (let y = topBlockY + TERRAIN_BLOCK_SIZE; y < canvas.height; y += TERRAIN_BLOCK_SIZE) {
-      const checker = ((sx / TERRAIN_BLOCK_SIZE + y / TERRAIN_BLOCK_SIZE) & 1) === 0;
+    const col = worldToTerrainCol(wx);
+    for (let y = topBlockY + BLOCK_SIZE; y < canvas.height; y += BLOCK_SIZE) {
+      const row = Math.floor((y + cameraY) / BLOCK_SIZE);
+      const checker = ((col + row) & 1) === 0;
       ctx.fillStyle = checker ? bodyA : bodyB;
-      ctx.fillRect(sx, y, TERRAIN_BLOCK_SIZE, TERRAIN_BLOCK_SIZE);
+      ctx.fillRect(sx, y, BLOCK_SIZE, BLOCK_SIZE);
     }
 
     ctx.strokeStyle = isNight() ? "rgba(15, 23, 42, 0.35)" : "rgba(30, 64, 45, 0.28)";
     ctx.lineWidth = 1;
-    for (let y = topBlockY; y < canvas.height; y += TERRAIN_BLOCK_SIZE) {
-      ctx.strokeRect(sx, y, TERRAIN_BLOCK_SIZE, TERRAIN_BLOCK_SIZE);
+    for (let y = topBlockY; y < canvas.height; y += BLOCK_SIZE) {
+      ctx.strokeRect(sx, y, BLOCK_SIZE, BLOCK_SIZE);
     }
   }
 
@@ -468,7 +470,7 @@ function drawUndergroundVision(cameraX, cameraY) {
     if (sx < -30 || sx > canvas.width + 30) return;
 
     const surfaceY = groundAt(site.x) - cameraY;
-    const depthY = surfaceY + TERRAIN_BLOCK_SIZE * 2.8;
+    const depthY = surfaceY + BLOCK_SIZE * 2.8;
 
     ctx.strokeStyle = "rgba(125, 211, 252, 0.45)";
     ctx.lineWidth = 1;
@@ -1537,15 +1539,18 @@ function gameLoop() {
   updateBuriedTreasures();
   updateCamera();
 
-  drawBackground(camera.x, camera.y);
-  drawGroundParticles(camera.x, camera.y);
-  drawPlacedBlocks(camera.x, camera.y);
-  drawTrees(camera.x, camera.y);
-  drawDroppedApples(camera.x, camera.y);
-  drawBuriedTreasures(camera.x, camera.y);
-  drawDog(camera.x, camera.y);
-  drawPlayer(camera.x, camera.y);
-  drawEnemies(camera.x, camera.y);
+  const renderCameraX = Math.floor(camera.x);
+  const renderCameraY = Math.floor(camera.y);
+
+  drawBackground(renderCameraX, renderCameraY);
+  drawGroundParticles(renderCameraX, renderCameraY);
+  drawPlacedBlocks(renderCameraX, renderCameraY);
+  drawTrees(renderCameraX, renderCameraY);
+  drawDroppedApples(renderCameraX, renderCameraY);
+  drawBuriedTreasures(renderCameraX, renderCameraY);
+  drawDog(renderCameraX, renderCameraY);
+  drawPlayer(renderCameraX, renderCameraY);
+  drawEnemies(renderCameraX, renderCameraY);
   drawHud();
   ui.render({
     hp: player.hp,
