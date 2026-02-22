@@ -3,6 +3,18 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 #game {
@@ -11,16 +23,208 @@
   display: block;
 }
 
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 20;
+}
+
+#status-panel {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: linear-gradient(130deg, rgba(13, 22, 40, 0.75), rgba(30, 51, 85, 0.52));
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+
+#hearts {
+  display: flex;
+  gap: 4px;
+}
+
+.heart {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  transform: rotate(45deg);
+  position: relative;
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+}
+
+.heart::before,
+.heart::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: inherit;
+}
+
+.heart::before {
+  left: -7px;
+}
+
+.heart::after {
+  top: -7px;
+}
+
+.heart.empty {
+  background: #4b5563;
+  box-shadow: none;
+}
+
+#phase-chip {
+  min-width: 48px;
+  text-align: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  background: linear-gradient(180deg, #fef08a, #fbbf24);
+}
+
+#phase-chip.night {
+  color: #e2e8f0;
+  background: linear-gradient(180deg, #334155, #0f172a);
+}
+
+#materials-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: linear-gradient(120deg, rgba(15, 23, 42, 0.82), rgba(30, 64, 175, 0.35));
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+
+.material-slot {
+  min-width: 110px;
+  height: 44px;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(15, 23, 42, 0.6);
+  color: #e2e8f0;
+}
+
+.material-slot.selected {
+  border-color: rgba(254, 240, 138, 0.75);
+  box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.55);
+}
+
+.material-slot[data-material="wood"] {
+  box-shadow: inset 0 0 0 1px rgba(167, 112, 58, 0.42);
+}
+
+.material-slot[data-material="dirt"] {
+  box-shadow: inset 0 0 0 1px rgba(143, 106, 68, 0.45);
+}
+
+.material-slot[data-material="emerald"] {
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.55);
+}
+
+.material-slot[data-material="nyx"] {
+  box-shadow: inset 0 0 0 1px rgba(71, 85, 105, 0.55);
+}
+
+.material-slot[data-material="amethyst"] {
+  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.55);
+}
+
+.material-name {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.88;
+}
+
+.material-count {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.material-slot.future {
+  opacity: 0.62;
+}
+
+#time-toggle,
+#info-toggle {
+  pointer-events: auto;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 10px;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.72);
+  backdrop-filter: blur(6px);
+  font: 700 13px "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
 #time-toggle {
   position: fixed;
-  top: 16px;
-  right: 16px;
-  z-index: 10;
-  border: 1px solid #111827;
-  border-radius: 8px;
+  top: 14px;
+  right: 14px;
+  z-index: 30;
   padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.9);
-  color: #111827;
-  font: 600 14px "Trebuchet MS", sans-serif;
-  cursor: pointer;
+}
+
+#info-toggle {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 30;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  font-size: 16px;
+  line-height: 1;
+}
+
+#info-box {
+  position: fixed;
+  right: 16px;
+  bottom: 58px;
+  width: min(280px, 76vw);
+  padding: 12px 13px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  background: rgba(15, 23, 42, 0.82);
+  color: #e2e8f0;
+  backdrop-filter: blur(7px);
+  pointer-events: auto;
+}
+
+#info-box.hidden {
+  display: none;
+}
+
+#info-box h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+#info-box p {
+  margin: 3px 0;
+  font-size: 13px;
+  opacity: 0.96;
 }

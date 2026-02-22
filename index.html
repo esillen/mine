@@ -8,6 +8,26 @@
   </head>
   <body>
     <button id="time-toggle" type="button">Byt till natt</button>
+    <div id="ui">
+      <div id="status-panel">
+        <div id="hearts" aria-label="Liv"></div>
+        <div id="phase-chip">Dag</div>
+      </div>
+
+      <div id="materials-bar" aria-label="Material"></div>
+
+      <button id="info-toggle" type="button" aria-expanded="false">i</button>
+      <aside id="info-box" class="hidden" aria-label="Spelinformation">
+        <h2>Hur man spelar</h2>
+        <p>Piltangenter/LS: gå</p>
+        <p>Mellanslag/A: hoppa</p>
+        <p>X: hugga</p>
+        <p>B: bygg</p>
+        <p>C eller LB/RB: byt material</p>
+        <p>Select: dag/natt</p>
+        <p>Start: ladda om</p>
+      </aside>
+    </div>
     <canvas id="game" aria-label="Spelplan"></canvas>
     <script src="./game.js"></script>
   </body>

@@ -1,6 +1,11 @@
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 const timeToggleButton = document.getElementById("time-toggle");
+const heartsContainer = document.getElementById("hearts");
+const phaseChip = document.getElementById("phase-chip");
+const materialsBar = document.getElementById("materials-bar");
+const infoToggleButton = document.getElementById("info-toggle");
+const infoBox = document.getElementById("info-box");
 
 const world = {
   gravity: 0.62,
@@ -45,7 +50,8 @@ const gamepadState = {
   jumpPressed: false,
   attackPressed: false,
   buildPressed: false,
-  swapPressed: false,
+  swapNextPressed: false,
+  swapPrevPressed: false,
   timePressed: false,
   dayNightPressed: false,
 };
@@ -62,12 +68,30 @@ const BLOCK_SIZE = 40;
 let defeated = 0;
 let wood = 50;
 let dirt = 0;
+let emerald = 999;
+let nyx = 999;
+let amethyst = 999;
 let selectedMaterial = "wood";
 let gameOver = false;
 let frameCount = 0;
 let spawnedThisNight = false;
 let hardReloadInProgress = false;
 let autoDayNightEnabled = false;
+const uiState = {
+  hp: -1,
+  phase: "",
+  selectedMaterial: "",
+  materials: {},
+};
+const MATERIAL_SLOT_CONFIG = [
+  { key: "wood", label: "Trä", future: false },
+  { key: "dirt", label: "Jord", future: false },
+  { key: "emerald", label: "Smaragd", future: false },
+  { key: "nyx", label: "Nyx", future: false },
+  { key: "amethyst", label: "Ametist", future: false },
+];
+const BUILD_MATERIALS = MATERIAL_SLOT_CONFIG.filter((slot) => !slot.future).map((slot) => slot.key);
+const materialSlotRefs = new Map();
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -126,6 +150,69 @@ function isNight() {
 function updateTimeToggleButton() {
   if (!timeToggleButton) return;
   timeToggleButton.textContent = isNight() ? "Byt till dag" : "Byt till natt";
+}
+
+function setupUI() {
+  if (!materialsBar) return;
+  materialsBar.innerHTML = "";
+  materialSlotRefs.clear();
+
+  MATERIAL_SLOT_CONFIG.forEach((slot) => {
+    const el = document.createElement("div");
+    el.className = `material-slot${slot.future ? " future" : ""}`;
+    el.dataset.material = slot.key;
+    el.innerHTML = `<span class="material-name">${slot.label}</span><span class="material-count">0</span>`;
+    materialsBar.appendChild(el);
+    materialSlotRefs.set(slot.key, el);
+  });
+}
+
+function renderHearts() {
+  if (!heartsContainer) return;
+  if (uiState.hp === player.hp) return;
+  uiState.hp = player.hp;
+
+  heartsContainer.innerHTML = "";
+  for (let i = 0; i < MAX_PLAYER_HP; i += 1) {
+    const heart = document.createElement("span");
+    heart.className = i < player.hp ? "heart" : "heart empty";
+    heartsContainer.appendChild(heart);
+  }
+}
+
+function renderPhaseChip() {
+  if (!phaseChip) return;
+  const phase = isNight() ? "Natt" : "Dag";
+  if (uiState.phase !== phase) {
+    uiState.phase = phase;
+    phaseChip.textContent = phase;
+    phaseChip.classList.toggle("night", phase === "Natt");
+  }
+}
+
+function renderMaterials() {
+  const currentValues = { wood, dirt, emerald, nyx, amethyst };
+  MATERIAL_SLOT_CONFIG.forEach((slot) => {
+    const el = materialSlotRefs.get(slot.key);
+    if (!el) return;
+
+    const count = currentValues[slot.key] ?? 0;
+    if (uiState.materials[slot.key] !== count) {
+      uiState.materials[slot.key] = count;
+      const countEl = el.querySelector(".material-count");
+      if (countEl) countEl.textContent = String(count);
+    }
+
+    if (!slot.future) {
+      el.classList.toggle("selected", selectedMaterial === slot.key);
+    }
+  });
+}
+
+function renderUI() {
+  renderHearts();
+  renderPhaseChip();
+  renderMaterials();
 }
 
 function getSkyColor() {
@@ -390,10 +477,26 @@ function drawPlacedBlocks(cameraX, cameraY) {
       ctx.fillRect(bx, by, block.size, block.size);
       ctx.fillStyle = "#a7703a";
       ctx.fillRect(bx + 5, by + 5, block.size - 10, block.size - 10);
-    } else {
+    } else if (block.material === "dirt") {
       ctx.fillStyle = "#7a5230";
       ctx.fillRect(bx, by, block.size, block.size);
       ctx.fillStyle = "#8f6a44";
+      ctx.fillRect(bx + 6, by + 6, block.size - 12, block.size - 12);
+    } else if (block.material === "emerald") {
+      ctx.fillStyle = "#059669";
+      ctx.fillRect(bx, by, block.size, block.size);
+      ctx.fillStyle = "#34d399";
+      ctx.fillRect(bx + 6, by + 6, block.size - 12, block.size - 12);
+    } else if (block.material === "nyx") {
+      ctx.fillStyle = "#0b1120";
+      ctx.fillRect(bx, by, block.size, block.size);
+      ctx.fillStyle = "#1f2937";
+      ctx.fillRect(bx + 6, by + 6, block.size - 12, block.size - 12);
+    } else {
+      // amethyst
+      ctx.fillStyle = "#6d28d9";
+      ctx.fillRect(bx, by, block.size, block.size);
+      ctx.fillStyle = "#a78bfa";
       ctx.fillRect(bx + 6, by + 6, block.size - 12, block.size - 12);
     }
 
@@ -704,43 +807,6 @@ function drawEnemies(cameraX, cameraY) {
 }
 
 function drawHud() {
-  const remaining = enemies.filter((enemy) => enemy.alive).length;
-  const phaseText = isNight() ? "Natt" : "Dag";
-  const hudBg = isNight() ? "rgba(15, 23, 42, 0.72)" : "rgba(255, 255, 255, 0.72)";
-  const textColor = isNight() ? "#f8fafc" : "#111827";
-
-  ctx.fillStyle = hudBg;
-  ctx.fillRect(8, 8, 620, 304);
-
-  ctx.fillStyle = textColor;
-  ctx.font = "20px Trebuchet MS, sans-serif";
-  ctx.fillText("Liv:", 16, 30);
-  const heartStartX = 62;
-  const heartY = 16;
-  const heartSize = 14;
-  for (let i = 0; i < MAX_PLAYER_HP; i += 1) {
-    const hx = heartStartX + i * (heartSize + 4);
-    const hy = heartY;
-    const filled = i < Math.max(0, player.hp);
-    const color = filled ? "#ef4444" : isNight() ? "#6b7280" : "#d1d5db";
-    ctx.fillStyle = color;
-    ctx.fillRect(hx + 2, hy, 4, 4);
-    ctx.fillRect(hx + 8, hy, 4, 4);
-    ctx.fillRect(hx, hy + 4, 14, 4);
-    ctx.fillRect(hx + 2, hy + 8, 10, 4);
-    ctx.fillRect(hx + 4, hy + 12, 6, 4);
-  }
-  ctx.fillText(`Nedkämpade fiender: ${defeated}`, 16, 56);
-  ctx.fillText(`Kvar: ${remaining}`, 16, 82);
-  ctx.fillText(`Fas: ${phaseText}`, 16, 108);
-  ctx.fillText(`Trä: ${wood}`, 16, 134);
-  ctx.fillText(`Jord: ${dirt}`, 16, 160);
-  ctx.fillText(`Byggmaterial: ${selectedMaterial === "wood" ? "trä" : "jord"}`, 16, 186);
-  ctx.fillText(`Bygg: B | Byt material: C`, 16, 212);
-  ctx.fillText(`Äpplen: fäll träd, gå över äpplet för heal`, 16, 238);
-  ctx.fillText(`Kontroll: LS rörelse | A hoppa | X hugga | B bygg | Y byt`, 16, 264);
-  ctx.fillText(`Gamepad: Select dag/natt | Start reload`, 16, 290);
-
   if (gameOver) {
     ctx.fillStyle = "#f8fafc";
     ctx.font = "bold 44px Trebuchet MS, sans-serif";
@@ -1015,7 +1081,10 @@ function tryBreakPlacedBlock(attackBox) {
 
     placedBlocks.splice(i, 1);
     if (block.material === "wood") wood += 1;
-    else dirt += 1;
+    else if (block.material === "dirt") dirt += 1;
+    else if (block.material === "emerald") emerald += 1;
+    else if (block.material === "nyx") nyx += 1;
+    else if (block.material === "amethyst") amethyst += 1;
     return true;
   }
 
@@ -1055,7 +1124,17 @@ function attack() {
 }
 
 function toggleBuildMaterial() {
-  selectedMaterial = selectedMaterial === "wood" ? "dirt" : "wood";
+  cycleBuildMaterial(1);
+}
+
+function cycleBuildMaterial(direction) {
+  const idx = BUILD_MATERIALS.indexOf(selectedMaterial);
+  const normalizedDirection = direction >= 0 ? 1 : -1;
+  const nextIdx =
+    idx < 0
+      ? 0
+      : (idx + normalizedDirection + BUILD_MATERIALS.length) % BUILD_MATERIALS.length;
+  selectedMaterial = BUILD_MATERIALS[nextIdx];
 }
 
 function placeBlock() {
@@ -1162,21 +1241,24 @@ function handleGamepadInput() {
   const jumpNow = !!pad.buttons[0]?.pressed; // A / Cross
   const buildNow = !!pad.buttons[1]?.pressed; // B / Circle
   const attackNow = !!pad.buttons[2]?.pressed; // X / Square
-  const swapNow = !!pad.buttons[3]?.pressed; // Y / Triangle
+  const swapPrevNow = !!pad.buttons[4]?.pressed; // LB / L1
+  const swapNextNow = !!pad.buttons[5]?.pressed; // RB / R1
   const dayNightNow = !!pad.buttons[8]?.pressed; // Select / Share
   const timeNow = !!pad.buttons[9]?.pressed; // Start / Options
 
   if (jumpNow && !gamepadState.jumpPressed) jump();
   if (attackNow && !gamepadState.attackPressed) attack();
   if (buildNow && !gamepadState.buildPressed) placeBlock();
-  if (swapNow && !gamepadState.swapPressed) toggleBuildMaterial();
+  if (swapPrevNow && !gamepadState.swapPrevPressed) cycleBuildMaterial(-1);
+  if (swapNextNow && !gamepadState.swapNextPressed) cycleBuildMaterial(1);
   if (dayNightNow && !gamepadState.dayNightPressed) toggleDayNight();
   if (timeNow && !gamepadState.timePressed) hardReloadPage();
 
   gamepadState.jumpPressed = jumpNow;
   gamepadState.attackPressed = attackNow;
   gamepadState.buildPressed = buildNow;
-  gamepadState.swapPressed = swapNow;
+  gamepadState.swapPrevPressed = swapPrevNow;
+  gamepadState.swapNextPressed = swapNextNow;
   gamepadState.dayNightPressed = dayNightNow;
   gamepadState.timePressed = timeNow;
 }
@@ -1203,6 +1285,7 @@ function gameLoop() {
   drawPlayer(camera.x, camera.y);
   drawEnemies(camera.x, camera.y);
   drawHud();
+  renderUI();
 
   requestAnimationFrame(gameLoop);
 }
@@ -1230,7 +1313,15 @@ if (timeToggleButton) {
   timeToggleButton.addEventListener("click", toggleDayNight);
 }
 
+if (infoToggleButton && infoBox) {
+  infoToggleButton.addEventListener("click", () => {
+    const isHidden = infoBox.classList.toggle("hidden");
+    infoToggleButton.setAttribute("aria-expanded", isHidden ? "false" : "true");
+  });
+}
+
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 initializeTrees();
+setupUI();
 gameLoop();
