@@ -1,3 +1,7 @@
+import { clamp, intersects } from "./utils.js";
+import { saveBuildState, loadBuildState } from "./save-system.js";
+import { createUIController } from "./ui-system.js";
+
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 const timeToggleButton = document.getElementById("time-toggle");
@@ -79,12 +83,6 @@ let frameCount = 0;
 let spawnedThisNight = false;
 let hardReloadInProgress = false;
 let autoDayNightEnabled = false;
-const uiState = {
-  hp: -1,
-  phase: "",
-  selectedMaterial: "",
-  materials: {},
-};
 const MATERIAL_SLOT_CONFIG = [
   { key: "wood", label: "Trä", future: false },
   { key: "dirt", label: "Jord", future: false },
@@ -93,49 +91,16 @@ const MATERIAL_SLOT_CONFIG = [
   { key: "amethyst", label: "Ametist", future: false },
 ];
 const BUILD_MATERIALS = MATERIAL_SLOT_CONFIG.filter((slot) => !slot.future).map((slot) => slot.key);
-const materialSlotRefs = new Map();
-const SAVE_KEY = "minecraft_like_build_v1";
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function saveBuildState() {
-  try {
-    const payload = {
-      placedBlocks,
-    };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
-  } catch (_error) {
-    // Ignore storage errors to avoid breaking gameplay.
-  }
-}
-
-function loadBuildState() {
-  try {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.placedBlocks)) return;
-
-    placedBlocks.length = 0;
-    for (const block of parsed.placedBlocks) {
-      if (!block || typeof block !== "object") continue;
-      if (typeof block.x !== "number" || typeof block.y !== "number") continue;
-      if (typeof block.size !== "number" || block.size <= 0) continue;
-      if (!BUILD_MATERIALS.includes(block.material)) continue;
-
-      placedBlocks.push({
-        x: clamp(block.x, 0, world.width - BLOCK_SIZE),
-        y: block.y,
-        size: BLOCK_SIZE,
-        material: block.material,
-      });
-    }
-  } catch (_error) {
-    // Ignore malformed saves.
-  }
-}
+const ui = createUIController({
+  heartsContainer,
+  phaseChip,
+  materialsBar,
+  timeToggleButton,
+  infoToggleButton,
+  infoBox,
+  maxPlayerHp: MAX_PLAYER_HP,
+  materialSlotConfig: MATERIAL_SLOT_CONFIG,
+});
 
 function rebuildPitCellIndex() {
   pitCellIndex.clear();
@@ -188,71 +153,7 @@ function isNight() {
 }
 
 function updateTimeToggleButton() {
-  if (!timeToggleButton) return;
-  timeToggleButton.textContent = isNight() ? "Byt till dag" : "Byt till natt";
-}
-
-function setupUI() {
-  if (!materialsBar) return;
-  materialsBar.innerHTML = "";
-  materialSlotRefs.clear();
-
-  MATERIAL_SLOT_CONFIG.forEach((slot) => {
-    const el = document.createElement("div");
-    el.className = `material-slot${slot.future ? " future" : ""}`;
-    el.dataset.material = slot.key;
-    el.innerHTML = `<span class="material-name">${slot.label}</span><span class="material-count">0</span>`;
-    materialsBar.appendChild(el);
-    materialSlotRefs.set(slot.key, el);
-  });
-}
-
-function renderHearts() {
-  if (!heartsContainer) return;
-  if (uiState.hp === player.hp) return;
-  uiState.hp = player.hp;
-
-  heartsContainer.innerHTML = "";
-  for (let i = 0; i < MAX_PLAYER_HP; i += 1) {
-    const heart = document.createElement("span");
-    heart.className = i < player.hp ? "heart" : "heart empty";
-    heartsContainer.appendChild(heart);
-  }
-}
-
-function renderPhaseChip() {
-  if (!phaseChip) return;
-  const phase = isNight() ? "Natt" : "Dag";
-  if (uiState.phase !== phase) {
-    uiState.phase = phase;
-    phaseChip.textContent = phase;
-    phaseChip.classList.toggle("night", phase === "Natt");
-  }
-}
-
-function renderMaterials() {
-  const currentValues = { wood, dirt, emerald, nyx, amethyst };
-  MATERIAL_SLOT_CONFIG.forEach((slot) => {
-    const el = materialSlotRefs.get(slot.key);
-    if (!el) return;
-
-    const count = currentValues[slot.key] ?? 0;
-    if (uiState.materials[slot.key] !== count) {
-      uiState.materials[slot.key] = count;
-      const countEl = el.querySelector(".material-count");
-      if (countEl) countEl.textContent = String(count);
-    }
-
-    if (!slot.future) {
-      el.classList.toggle("selected", selectedMaterial === slot.key);
-    }
-  });
-}
-
-function renderUI() {
-  renderHearts();
-  renderPhaseChip();
-  renderMaterials();
+  ui.updateTimeToggle(isNight());
 }
 
 function getSkyColor() {
@@ -325,15 +226,6 @@ function updateCamera() {
 
   camera.x += (clampedX - camera.x) * camera.smoothX;
   camera.y += (clampedY - camera.y) * camera.smoothY;
-}
-
-function intersects(a, b) {
-  return (
-    a.x < b.x + b.w &&
-    a.x + a.w > b.x &&
-    a.y < b.y + b.h &&
-    a.y + a.h > b.y
-  );
 }
 
 function createEnemy(type, x, direction = 1) {
@@ -1267,7 +1159,7 @@ function tryBreakPlacedBlock(attackBox) {
     else if (block.material === "emerald") emerald += 1;
     else if (block.material === "nyx") nyx += 1;
     else if (block.material === "amethyst") amethyst += 1;
-    saveBuildState();
+    saveBuildState(placedBlocks);
     return true;
   }
 
@@ -1355,7 +1247,7 @@ function placeBlock() {
       size: BLOCK_SIZE,
       material: selectedMaterial,
     });
-    saveBuildState();
+    saveBuildState(placedBlocks);
     return;
   }
 }
@@ -1471,7 +1363,12 @@ function gameLoop() {
   drawPlayer(camera.x, camera.y);
   drawEnemies(camera.x, camera.y);
   drawHud();
-  renderUI();
+  ui.render({
+    hp: player.hp,
+    isNight: isNight(),
+    selectedMaterial,
+    materials: { wood, dirt, emerald, nyx, amethyst },
+  });
 
   requestAnimationFrame(gameLoop);
 }
@@ -1499,17 +1396,17 @@ if (timeToggleButton) {
   timeToggleButton.addEventListener("click", toggleDayNight);
 }
 
-if (infoToggleButton && infoBox) {
-  infoToggleButton.addEventListener("click", () => {
-    const isHidden = infoBox.classList.toggle("hidden");
-    infoToggleButton.setAttribute("aria-expanded", isHidden ? "false" : "true");
-  });
-}
-
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 initializeTrees();
 initializeBuriedSites();
-loadBuildState();
-setupUI();
+placedBlocks.push(
+  ...loadBuildState({
+    worldWidth: world.width,
+    blockSize: BLOCK_SIZE,
+    buildMaterials: BUILD_MATERIALS,
+  })
+);
+ui.setup();
+ui.bindInfoToggle();
 gameLoop();
