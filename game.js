@@ -44,6 +44,7 @@ const player = {
   hp: MAX_PLAYER_HP,
   facing: 1,
   attackTimer: 0,
+  attackDirection: "forward",
   hitCooldown: 0,
 };
 
@@ -716,11 +717,22 @@ function drawPlayer(cameraX, cameraY) {
   const swordW = 6;
   const swordH = 30;
   const handX = player.facing > 0 ? px + w + armW - 1 : px - armW + 1;
-  const handY = torsoY + Math.floor(torsoH * 0.45);
+  const isDownAttack = player.attackDirection === "down" && player.attackTimer > 0;
+  const isUpAttack = player.attackDirection === "up" && player.attackTimer > 0;
+  const handY = isDownAttack
+    ? py + h + 2
+    : isUpAttack
+      ? py + 2
+      : torsoY + Math.floor(torsoH * 0.45);
   const isAttacking = player.attackTimer > 0;
   const swingT = isAttacking ? 1 - player.attackTimer / 12 : 0;
   const baseAngle = player.facing > 0 ? -0.28 : Math.PI + 0.28;
-  const swingAngle = player.facing > 0 ? -1.55 + swingT * 2.2 : Math.PI + 1.55 - swingT * 2.2;
+  let swingAngle = player.facing > 0 ? -1.55 + swingT * 2.2 : Math.PI + 1.55 - swingT * 2.2;
+  if (isDownAttack) {
+    swingAngle = player.facing > 0 ? 0.3 + swingT * 1.2 : Math.PI - 0.3 - swingT * 1.2;
+  } else if (isUpAttack) {
+    swingAngle = player.facing > 0 ? -2.1 + swingT * 1.3 : Math.PI + 2.1 - swingT * 1.3;
+  }
   const swordAngle = isAttacking ? swingAngle : baseAngle;
 
   if (isAttacking) {
@@ -1317,6 +1329,7 @@ function attack() {
   player.attackTimer = 12;
   const centerX = player.x + player.w / 2;
   const attackDirection = keys.down ? "down" : keys.up ? "up" : "forward";
+  player.attackDirection = attackDirection;
   let attackBox;
 
   if (attackDirection === "up") {
