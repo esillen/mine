@@ -59,6 +59,8 @@ const gamepadState = {
 const enemies = [];
 const trees = [];
 const droppedApples = [];
+const buriedSites = [];
+const buriedTreasures = [];
 const groundCuts = [];
 const terrainPits = [];
 const groundParticles = [];
@@ -270,6 +272,11 @@ function resizeCanvas() {
   trees.forEach((tree) => {
     tree.y = groundAt(tree.x);
   });
+  buriedTreasures.forEach((treasure) => {
+    if (typeof treasure.depthOffset === "number") {
+      treasure.y = groundAt(treasure.x) + treasure.depthOffset;
+    }
+  });
 }
 
 function updateCamera() {
@@ -381,6 +388,20 @@ function initializeTrees() {
   }
 }
 
+function initializeBuriedSites() {
+  buriedSites.length = 0;
+  const siteXs = [640, 1320, 1880, 2470, 3060, 3780, 4460];
+  siteXs.forEach((x, index) => {
+    buriedSites.push({
+      x,
+      progress: 0,
+      threshold: 3 + (index % 3),
+      revealed: false,
+      tunnelSize: 6 + (index % 4),
+    });
+  });
+}
+
 function spawnNightWave() {
   enemies.length = 0;
 
@@ -444,6 +465,19 @@ function drawTerrain(cameraX, cameraY) {
   }
 
   drawGroundCuts(cameraX, cameraY);
+  drawBuriedSiteHints(cameraX, cameraY);
+}
+
+function drawBuriedSiteHints(cameraX, cameraY) {
+  ctx.fillStyle = "rgba(30, 41, 59, 0.35)";
+  buriedSites.forEach((site) => {
+    if (site.revealed) return;
+    const sx = site.x - cameraX;
+    if (sx < -30 || sx > canvas.width + 30) return;
+    const sy = groundAt(site.x) - cameraY - 4;
+    ctx.fillRect(sx - 10, sy, 20, 2);
+    ctx.fillRect(sx - 2, sy - 4, 4, 8);
+  });
 }
 
 function drawGroundCuts(cameraX, cameraY) {
@@ -552,6 +586,36 @@ function drawDroppedApples(cameraX, cameraY) {
     ctx.fillRect(ax - 4, ay - 4, 8, 8);
     ctx.fillStyle = "#22c55e";
     ctx.fillRect(ax - 1, ay - 6, 3, 2);
+  });
+}
+
+function drawBuriedTreasures(cameraX, cameraY) {
+  buriedTreasures.forEach((treasure) => {
+    if (treasure.collected) return;
+    const tx = treasure.x - cameraX;
+    const ty = treasure.y - cameraY;
+    if (tx < -20 || tx > canvas.width + 20) return;
+
+    if (treasure.type === "cache") {
+      ctx.fillStyle = "#92400e";
+      ctx.fillRect(tx - 9, ty - 7, 18, 14);
+      ctx.fillStyle = "#fbbf24";
+      ctx.fillRect(tx - 9, ty - 3, 18, 3);
+      ctx.fillStyle = "#78350f";
+      ctx.fillRect(tx - 2, ty - 2, 4, 4);
+      return;
+    }
+
+    const gemColors = {
+      emerald: ["#047857", "#34d399"],
+      nyx: ["#0f172a", "#334155"],
+      amethyst: ["#6d28d9", "#c4b5fd"],
+    };
+    const colors = gemColors[treasure.type] || ["#155e75", "#67e8f9"];
+    ctx.fillStyle = colors[0];
+    ctx.fillRect(tx - 6, ty - 6, 12, 12);
+    ctx.fillStyle = colors[1];
+    ctx.fillRect(tx - 3, ty - 3, 6, 6);
   });
 }
 
@@ -1010,6 +1074,85 @@ function updateDroppedApples() {
   }
 }
 
+function spawnBuriedTreasure(type, x, depthOffset) {
+  buriedTreasures.push({
+    type,
+    x,
+    depthOffset,
+    y: groundAt(x) + depthOffset,
+    collected: false,
+  });
+}
+
+function revealBuriedSite(site) {
+  site.revealed = true;
+  const step = 54;
+  const count = site.tunnelSize;
+  const start = site.x - step;
+
+  for (let i = 0; i < count; i += 1) {
+    const px = start + i * step;
+    const depth = 16 + Math.sin(i * 0.85) * 10 + (i % 2 === 0 ? 5 : 0);
+    terrainPits.push({
+      x: clamp(px, 0, world.width),
+      radius: 52,
+      depth: 22 + depth,
+    });
+  }
+
+  const treasureTypes = ["emerald", "nyx", "amethyst", "cache"];
+  const treasureCount = 1 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < treasureCount; i += 1) {
+    const tx = site.x + (Math.random() - 0.5) * (count * step * 0.65);
+    const type = treasureTypes[Math.floor(Math.random() * treasureTypes.length)];
+    const depthOffset = 36 + Math.random() * 38;
+    spawnBuriedTreasure(type, clamp(tx, 0, world.width), depthOffset);
+  }
+
+  if (terrainPits.length > PERF.maxTerrainPits) {
+    terrainPits.splice(0, terrainPits.length - PERF.maxTerrainPits);
+  }
+  rebuildPitCellIndex();
+}
+
+function tryRevealBuriedSite(digX) {
+  for (const site of buriedSites) {
+    if (site.revealed) continue;
+    if (Math.abs(site.x - digX) > 90) continue;
+
+    site.progress += 1;
+    if (site.progress >= site.threshold) {
+      revealBuriedSite(site);
+      return true;
+    }
+  }
+  return false;
+}
+
+function updateBuriedTreasures() {
+  const playerBox = { x: player.x, y: player.y, w: player.w, h: player.h };
+  for (let i = buriedTreasures.length - 1; i >= 0; i -= 1) {
+    const t = buriedTreasures[i];
+    if (t.collected) continue;
+    const box = { x: t.x - 8, y: t.y - 8, w: 16, h: 16 };
+    if (!intersects(playerBox, box)) continue;
+
+    if (t.type === "emerald") emerald += 8;
+    else if (t.type === "nyx") nyx += 8;
+    else if (t.type === "amethyst") amethyst += 8;
+    else {
+      wood += 14;
+      dirt += 10;
+      emerald += 3;
+      nyx += 3;
+      amethyst += 3;
+    }
+
+    t.collected = true;
+    buriedTreasures.splice(i, 1);
+  }
+}
+
 function dropTreeApples(tree) {
   const count = tree.apples || 0;
   for (let i = 0; i < count; i += 1) {
@@ -1059,6 +1202,7 @@ function tryDigGround(attackBox) {
 
   dirt += 1;
   digTerrainAt(attackX);
+  tryRevealBuriedSite(attackX);
   spawnGroundParticles(attackX, groundYBeforeDig);
   groundCuts.push({
     x: clamp(attackX, 0, world.width),
@@ -1275,6 +1419,7 @@ function gameLoop() {
   updateGroundCuts();
   updateGroundParticles();
   updateDroppedApples();
+  updateBuriedTreasures();
   updateCamera();
 
   drawBackground(camera.x, camera.y);
@@ -1282,6 +1427,7 @@ function gameLoop() {
   drawPlacedBlocks(camera.x, camera.y);
   drawTrees(camera.x, camera.y);
   drawDroppedApples(camera.x, camera.y);
+  drawBuriedTreasures(camera.x, camera.y);
   drawPlayer(camera.x, camera.y);
   drawEnemies(camera.x, camera.y);
   drawHud();
@@ -1323,5 +1469,6 @@ if (infoToggleButton && infoBox) {
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 initializeTrees();
+initializeBuriedSites();
 setupUI();
 gameLoop();
