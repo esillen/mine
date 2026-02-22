@@ -45,6 +45,8 @@ const enemies = [];
 const trees = [];
 const droppedApples = [];
 const groundCuts = [];
+const terrainPits = [];
+const groundParticles = [];
 const placedBlocks = [];
 const BLOCK_SIZE = 40;
 let defeated = 0;
@@ -61,12 +63,24 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function getTerrainDigDepth(worldX) {
+  let depth = 0;
+  for (const pit of terrainPits) {
+    const dx = Math.abs(worldX - pit.x);
+    if (dx > pit.radius) continue;
+    const t = 1 - dx / pit.radius;
+    depth += t * t * pit.depth;
+  }
+  return Math.min(depth, 90);
+}
+
 function groundAt(worldX) {
   const x = clamp(worldX, 0, world.width);
   const hills = Math.sin(x * 0.0048) * 70;
   const mountains = Math.sin(x * 0.0019 + 0.6) * 110;
   const valleys = Math.sin(x * 0.009 + 1.3) * 26;
-  return world.baseGround + hills + mountains + valleys;
+  const dugDepth = getTerrainDigDepth(x);
+  return world.baseGround + hills + mountains + valleys + dugDepth;
 }
 
 function getDayPhase() {
@@ -320,6 +334,16 @@ function drawGroundCuts(cameraX, cameraY) {
     const sx = cut.x - cameraX - cut.size / 2;
     const sy = groundAt(cut.x) - cameraY - 2;
     ctx.fillRect(sx, sy, cut.size, 6);
+  });
+}
+
+function drawGroundParticles(cameraX, cameraY) {
+  groundParticles.forEach((piece) => {
+    const px = piece.x - cameraX;
+    const py = piece.y - cameraY;
+    if (px < -20 || px > canvas.width + 20) return;
+    ctx.fillStyle = piece.color;
+    ctx.fillRect(px, py, piece.size, piece.size);
   });
 }
 
@@ -799,6 +823,56 @@ function updateGroundCuts() {
   }
 }
 
+function updateGroundParticles() {
+  for (let i = groundParticles.length - 1; i >= 0; i -= 1) {
+    const piece = groundParticles[i];
+    piece.x = clamp(piece.x + piece.vx, 0, world.width);
+    piece.y += piece.vy;
+    piece.vy += world.gravity * 0.55;
+    piece.vx *= 0.99;
+    piece.ttl -= 1;
+
+    const floorY = groundAt(piece.x) - piece.size;
+    if (piece.y >= floorY) {
+      piece.y = floorY;
+      piece.vy *= -0.2;
+      piece.vx *= 0.7;
+    }
+
+    if (piece.ttl <= 0) {
+      groundParticles.splice(i, 1);
+    }
+  }
+}
+
+function digTerrainAt(worldX) {
+  const x = clamp(worldX, 0, world.width);
+  const existing = terrainPits.find((pit) => Math.abs(pit.x - x) <= 24);
+  if (existing) {
+    existing.depth = Math.min(existing.depth + 4.2, 40);
+    existing.radius = Math.min(existing.radius + 2, 66);
+  } else {
+    terrainPits.push({ x, radius: 44, depth: 10 });
+    if (terrainPits.length > 220) terrainPits.shift();
+  }
+}
+
+function spawnGroundParticles(worldX, worldY) {
+  const count = 9;
+  for (let i = 0; i < count; i += 1) {
+    const dark = i % 2 === 0;
+    groundParticles.push({
+      x: worldX + (Math.random() - 0.5) * 18,
+      y: worldY - 2 + (Math.random() - 0.5) * 6,
+      vx: (Math.random() - 0.5) * 3.6,
+      vy: -2.8 - Math.random() * 3.1,
+      size: 3 + Math.floor(Math.random() * 3),
+      ttl: 50 + Math.floor(Math.random() * 30),
+      color: dark ? "#5b3b1f" : "#8b5a2b",
+    });
+  }
+}
+
 function updateDroppedApples() {
   const playerBox = { x: player.x, y: player.y, w: player.w, h: player.h };
 
@@ -874,11 +948,13 @@ function tryChopTree(attackBox) {
 
 function tryDigGround(attackBox) {
   const attackX = player.facing > 0 ? attackBox.x + attackBox.w : attackBox.x;
-  const groundY = groundAt(attackX);
-  const isCloseToGround = attackBox.y + attackBox.h >= groundY - 10;
+  const groundYBeforeDig = groundAt(attackX);
+  const isCloseToGround = attackBox.y + attackBox.h >= groundYBeforeDig - 10;
   if (!isCloseToGround) return false;
 
   dirt += 1;
+  digTerrainAt(attackX);
+  spawnGroundParticles(attackX, groundYBeforeDig);
   groundCuts.push({
     x: clamp(attackX, 0, world.width),
     size: 22,
@@ -1076,10 +1152,12 @@ function gameLoop() {
   updatePlayer();
   updateEnemies();
   updateGroundCuts();
+  updateGroundParticles();
   updateDroppedApples();
   updateCamera();
 
   drawBackground(camera.x, camera.y);
+  drawGroundParticles(camera.x, camera.y);
   drawPlacedBlocks(camera.x, camera.y);
   drawTrees(camera.x, camera.y);
   drawDroppedApples(camera.x, camera.y);
