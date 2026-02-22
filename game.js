@@ -26,6 +26,7 @@ const PERF = {
   maxTerrainPits: 120,
   maxGroundParticles: 120,
   maxGroundCuts: 50,
+  birdCount: 10,
 };
 const PIT_CELL_SIZE = 140;
 
@@ -61,6 +62,7 @@ const gamepadState = {
 };
 
 const enemies = [];
+const birds = [];
 const trees = [];
 const droppedApples = [];
 const buriedSites = [];
@@ -332,6 +334,20 @@ function initializeBuriedSites() {
   });
 }
 
+function initializeBirds() {
+  birds.length = 0;
+  for (let i = 0; i < PERF.birdCount; i += 1) {
+    const x = (world.width / PERF.birdCount) * i + Math.random() * 180;
+    birds.push({
+      x,
+      y: 70 + Math.random() * 180,
+      vx: (Math.random() < 0.5 ? -1 : 1) * (1 + Math.random() * 0.9),
+      flapOffset: Math.random() * Math.PI * 2,
+      targetY: 70 + Math.random() * 180,
+    });
+  }
+}
+
 function spawnNightWave() {
   enemies.length = 0;
 
@@ -369,7 +385,26 @@ function drawBackground(cameraX, cameraY) {
     }
   }
 
+  drawBirds(cameraX);
   drawTerrain(cameraX, cameraY);
+}
+
+function drawBirds(cameraX) {
+  ctx.strokeStyle = isNight() ? "#cbd5e1" : "#1f2937";
+  ctx.lineWidth = 2;
+
+  birds.forEach((bird, index) => {
+    const bx = bird.x - cameraX;
+    if (bx < -30 || bx > canvas.width + 30) return;
+
+    const flap = Math.sin(frameCount * 0.18 + bird.flapOffset + index * 0.3) * 3.5;
+    const by = bird.y;
+    ctx.beginPath();
+    ctx.moveTo(bx - 8, by + flap);
+    ctx.lineTo(bx, by - flap * 0.4);
+    ctx.lineTo(bx + 8, by + flap);
+    ctx.stroke();
+  });
 }
 
 function drawTerrain(cameraX, cameraY) {
@@ -1083,6 +1118,27 @@ function updateBuriedTreasures() {
   }
 }
 
+function updateBirds() {
+  for (const bird of birds) {
+    bird.x += bird.vx;
+    bird.y += (bird.targetY - bird.y) * 0.02;
+
+    if (Math.abs(bird.targetY - bird.y) < 6) {
+      bird.targetY = 70 + Math.random() * 180;
+    }
+
+    if (bird.x < -120) {
+      bird.x = world.width + 120;
+      bird.y = 70 + Math.random() * 180;
+      bird.targetY = bird.y;
+    } else if (bird.x > world.width + 120) {
+      bird.x = -120;
+      bird.y = 70 + Math.random() * 180;
+      bird.targetY = bird.y;
+    }
+  }
+}
+
 function dropTreeApples(tree) {
   const count = tree.apples || 0;
   for (let i = 0; i < count; i += 1) {
@@ -1351,6 +1407,7 @@ function gameLoop() {
   updateGroundCuts();
   updateGroundParticles();
   updateDroppedApples();
+  updateBirds();
   updateBuriedTreasures();
   updateCamera();
 
@@ -1400,6 +1457,7 @@ window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 initializeTrees();
 initializeBuriedSites();
+initializeBirds();
 placedBlocks.push(
   ...loadBuildState({
     worldWidth: world.width,
