@@ -10,6 +10,15 @@ const world = {
 };
 
 const MAX_PLAYER_HP = 8;
+const PERF = {
+  terrainStep: 8,
+  grassStep: 36,
+  starCount: 22,
+  maxTerrainPits: 120,
+  maxGroundParticles: 120,
+  maxGroundCuts: 50,
+};
+const PIT_CELL_SIZE = 140;
 
 const player = {
   x: 120,
@@ -47,6 +56,7 @@ const droppedApples = [];
 const groundCuts = [];
 const terrainPits = [];
 const groundParticles = [];
+const pitCellIndex = new Map();
 const placedBlocks = [];
 const BLOCK_SIZE = 40;
 let defeated = 0;
@@ -63,9 +73,30 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function getTerrainDigDepth(worldX) {
-  let depth = 0;
+function rebuildPitCellIndex() {
+  pitCellIndex.clear();
   for (const pit of terrainPits) {
+    const start = Math.floor((pit.x - pit.radius) / PIT_CELL_SIZE);
+    const end = Math.floor((pit.x + pit.radius) / PIT_CELL_SIZE);
+    for (let cell = start; cell <= end; cell += 1) {
+      if (!pitCellIndex.has(cell)) pitCellIndex.set(cell, []);
+      pitCellIndex.get(cell).push(pit);
+    }
+  }
+}
+
+function getTerrainDigDepth(worldX) {
+  if (terrainPits.length === 0) return 0;
+
+  let depth = 0;
+  const cell = Math.floor(worldX / PIT_CELL_SIZE);
+  const candidates = [];
+  for (let i = cell - 1; i <= cell + 1; i += 1) {
+    const bucket = pitCellIndex.get(i);
+    if (bucket) candidates.push(...bucket);
+  }
+
+  for (const pit of candidates) {
     const dx = Math.abs(worldX - pit.x);
     if (dx > pit.radius) continue;
     const t = 1 - dx / pit.radius;
@@ -293,7 +324,7 @@ function drawBackground(cameraX, cameraY) {
 
   if (isNight()) {
     ctx.fillStyle = "#cbd5e1";
-    for (let i = 0; i < 40; i += 1) {
+    for (let i = 0; i < PERF.starCount; i += 1) {
       const sx = (i * 173 + frameCount * 0.07) % canvas.width;
       const sy = 25 + ((i * 61) % 120);
       ctx.fillRect(Math.floor(sx), sy, 2, 2);
@@ -308,7 +339,7 @@ function drawTerrain(cameraX, cameraY) {
   ctx.beginPath();
   ctx.moveTo(0, canvas.height);
 
-  for (let sx = 0; sx <= canvas.width; sx += 4) {
+  for (let sx = 0; sx <= canvas.width; sx += PERF.terrainStep) {
     const wx = cameraX + sx;
     const gy = groundAt(wx) - cameraY;
     ctx.lineTo(sx, gy);
@@ -319,10 +350,10 @@ function drawTerrain(cameraX, cameraY) {
   ctx.fill();
 
   ctx.fillStyle = isNight() ? "#2d5c34" : "#5ca45f";
-  for (let sx = 0; sx <= canvas.width; sx += 20) {
+  for (let sx = 0; sx <= canvas.width; sx += PERF.grassStep) {
     const wx = cameraX + sx;
     const gy = groundAt(wx) - cameraY;
-    ctx.fillRect(sx, gy - 4, 16, 4);
+    ctx.fillRect(sx, gy - 3, 12, 3);
   }
 
   drawGroundCuts(cameraX, cameraY);
@@ -332,6 +363,7 @@ function drawGroundCuts(cameraX, cameraY) {
   ctx.fillStyle = isNight() ? "#16301b" : "#2f4f2f";
   groundCuts.forEach((cut) => {
     const sx = cut.x - cameraX - cut.size / 2;
+    if (sx + cut.size < -20 || sx > canvas.width + 20) return;
     const sy = groundAt(cut.x) - cameraY - 2;
     ctx.fillRect(sx, sy, cut.size, 6);
   });
@@ -824,6 +856,8 @@ function updateGroundCuts() {
 }
 
 function updateGroundParticles() {
+  if (groundParticles.length === 0) return;
+
   for (let i = groundParticles.length - 1; i >= 0; i -= 1) {
     const piece = groundParticles[i];
     piece.x = clamp(piece.x + piece.vx, 0, world.width);
@@ -853,12 +887,13 @@ function digTerrainAt(worldX) {
     existing.radius = Math.min(existing.radius + 2, 66);
   } else {
     terrainPits.push({ x, radius: 44, depth: 10 });
-    if (terrainPits.length > 220) terrainPits.shift();
+    if (terrainPits.length > PERF.maxTerrainPits) terrainPits.shift();
   }
+  rebuildPitCellIndex();
 }
 
 function spawnGroundParticles(worldX, worldY) {
-  const count = 9;
+  const count = 5;
   for (let i = 0; i < count; i += 1) {
     const dark = i % 2 === 0;
     groundParticles.push({
@@ -867,9 +902,13 @@ function spawnGroundParticles(worldX, worldY) {
       vx: (Math.random() - 0.5) * 3.6,
       vy: -2.8 - Math.random() * 3.1,
       size: 3 + Math.floor(Math.random() * 3),
-      ttl: 50 + Math.floor(Math.random() * 30),
+      ttl: 30 + Math.floor(Math.random() * 20),
       color: dark ? "#5b3b1f" : "#8b5a2b",
     });
+  }
+
+  if (groundParticles.length > PERF.maxGroundParticles) {
+    groundParticles.splice(0, groundParticles.length - PERF.maxGroundParticles);
   }
 }
 
@@ -961,7 +1000,7 @@ function tryDigGround(attackBox) {
     ttl: 900,
   });
 
-  if (groundCuts.length > 80) {
+  if (groundCuts.length > PERF.maxGroundCuts) {
     groundCuts.shift();
   }
 
