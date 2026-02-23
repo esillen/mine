@@ -90,6 +90,7 @@ const pitCellIndex = new Map();
 const removedGroundBlocks = new Set();
 const placedBlocks = [];
 const placedBlockCells = new Set();
+const terrainSurfaceRows = [];
 const BLOCK_SIZE = 40;
 let defeated = 0;
 let wood = 50;
@@ -154,9 +155,22 @@ function groundAt(worldX) {
   return Math.floor(height / BLOCK_SIZE) * BLOCK_SIZE;
 }
 
+function initializeTerrainSurfaceRows() {
+  terrainSurfaceRows.length = 0;
+  const maxCol = Math.floor(world.width / BLOCK_SIZE) + 2;
+  for (let col = 0; col <= maxCol; col += 1) {
+    const centerX = col * BLOCK_SIZE + BLOCK_SIZE * 0.5;
+    terrainSurfaceRows[col] = worldToTerrainRow(groundAt(centerX));
+  }
+}
+
 function surfaceRowForCol(col) {
-  const centerX = col * BLOCK_SIZE + BLOCK_SIZE * 0.5;
-  return worldToTerrainRow(groundAt(centerX));
+  if (col < 0) return -99999;
+  if (col >= terrainSurfaceRows.length) {
+    const clamped = terrainSurfaceRows.length - 1;
+    return terrainSurfaceRows[Math.max(0, clamped)] ?? 0;
+  }
+  return terrainSurfaceRows[col];
 }
 
 function isTerrainSolidCell(col, row) {
@@ -172,20 +186,6 @@ function isPlacedSolidCell(col, row) {
 
 function isSolidCell(col, row) {
   return isTerrainSolidCell(col, row) || isPlacedSolidCell(col, row);
-}
-
-function intersectsSolid(x, y, w, h) {
-  const leftCol = worldToTerrainCol(x);
-  const rightCol = worldToTerrainCol(x + w - 1);
-  const topRow = worldToTerrainRow(y);
-  const bottomRow = worldToTerrainRow(y + h - 1);
-
-  for (let col = leftCol; col <= rightCol; col += 1) {
-    for (let row = topRow; row <= bottomRow; row += 1) {
-      if (isSolidCell(col, row)) return true;
-    }
-  }
-  return false;
 }
 
 function rebuildPlacedBlockCells() {
@@ -257,6 +257,7 @@ function resizeCanvas() {
   world.baseGround = canvas.height - 95;
   camera.minY = -canvas.height * 0.35;
   camera.maxY = canvas.height * 0.65;
+  initializeTerrainSurfaceRows();
 
   player.y = groundAt(player.x + player.w / 2) - player.h;
   dog.y = groundAt(dog.x + dog.w / 2) - dog.h;
@@ -1030,39 +1031,59 @@ function updatePlayer() {
     player.facing = 1;
   }
 
+  // Horizontal move: only check the leading edge cells.
+  let nextX = clamp(player.x + player.vx, 0, world.width - player.w);
+  if (player.vx > 0) {
+    const rightCol = worldToTerrainCol(nextX + player.w - 1);
+    const topRow = worldToTerrainRow(player.y + 1);
+    const bottomRow = worldToTerrainRow(player.y + player.h - 1);
+    for (let row = topRow; row <= bottomRow; row += 1) {
+      if (!isSolidCell(rightCol, row)) continue;
+      nextX = rightCol * BLOCK_SIZE - player.w;
+      player.vx = 0;
+      break;
+    }
+  } else if (player.vx < 0) {
+    const leftCol = worldToTerrainCol(nextX);
+    const topRow = worldToTerrainRow(player.y + 1);
+    const bottomRow = worldToTerrainRow(player.y + player.h - 1);
+    for (let row = topRow; row <= bottomRow; row += 1) {
+      if (!isSolidCell(leftCol, row)) continue;
+      nextX = (leftCol + 1) * BLOCK_SIZE;
+      player.vx = 0;
+      break;
+    }
+  }
+  player.x = nextX;
+
+  // Vertical move: only check the leading edge cells.
   player.vy += world.gravity;
+  let nextY = player.y + player.vy;
+  player.onGround = false;
 
-  // Horizontal move with solid block collision.
-  player.x += player.vx;
-  if (intersectsSolid(player.x, player.y, player.w, player.h)) {
-    const dirX = Math.sign(player.vx);
-    if (dirX !== 0) {
-      while (intersectsSolid(player.x, player.y, player.w, player.h)) {
-        player.x -= dirX;
-      }
-    } else {
-      // Fallback nudge if spawned in a solid cell.
-      let safety = 0;
-      while (intersectsSolid(player.x, player.y, player.w, player.h) && safety < BLOCK_SIZE * 2) {
-        player.y -= 1;
-        safety += 1;
-      }
+  if (player.vy > 0) {
+    const bottomRow = worldToTerrainRow(nextY + player.h - 1);
+    const leftCol = worldToTerrainCol(player.x + 2);
+    const rightCol = worldToTerrainCol(player.x + player.w - 3);
+    for (let col = leftCol; col <= rightCol; col += 1) {
+      if (!isSolidCell(col, bottomRow)) continue;
+      nextY = bottomRow * BLOCK_SIZE - player.h;
+      player.vy = 0;
+      player.onGround = true;
+      break;
     }
-    player.vx = 0;
-  }
-
-  // Vertical move with solid block collision.
-  player.y += player.vy;
-  if (intersectsSolid(player.x, player.y, player.w, player.h)) {
-    const dirY = Math.sign(player.vy) || 1;
-    while (intersectsSolid(player.x, player.y, player.w, player.h)) {
-      player.y -= dirY;
+  } else if (player.vy < 0) {
+    const topRow = worldToTerrainRow(nextY);
+    const leftCol = worldToTerrainCol(player.x + 2);
+    const rightCol = worldToTerrainCol(player.x + player.w - 3);
+    for (let col = leftCol; col <= rightCol; col += 1) {
+      if (!isSolidCell(col, topRow)) continue;
+      nextY = (topRow + 1) * BLOCK_SIZE;
+      player.vy = 0;
+      break;
     }
-    player.onGround = player.vy > 0;
-    player.vy = 0;
-  } else {
-    player.onGround = false;
   }
+  player.y = nextY;
 
   player.x = clamp(player.x, 0, world.width - player.w);
 
