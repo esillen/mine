@@ -23,12 +23,10 @@ const PERF = {
   terrainStep: 8,
   grassStep: 36,
   starCount: 22,
-  maxTerrainPits: 120,
   maxGroundParticles: 120,
   maxGroundCuts: 50,
   birdCount: 10,
 };
-const PIT_CELL_SIZE = 140;
 
 const player = {
   x: 120,
@@ -84,9 +82,7 @@ const droppedCoins = [];
 const buriedSites = [];
 const buriedTreasures = [];
 const groundCuts = [];
-const terrainPits = [];
 const groundParticles = [];
-const pitCellIndex = new Map();
 const removedGroundBlocks = new Set();
 const placedBlocks = [];
 const placedBlockCells = new Set();
@@ -125,10 +121,6 @@ const ui = createUIController({
   materialSlotConfig: MATERIAL_SLOT_CONFIG,
 });
 
-function rebuildPitCellIndex() {
-  pitCellIndex.clear();
-}
-
 function worldToTerrainCol(worldX) {
   return Math.floor(clamp(worldX, 0, world.width) / BLOCK_SIZE);
 }
@@ -141,17 +133,12 @@ function terrainKey(col, row) {
   return `${col},${row}`;
 }
 
-function getTerrainDigDepth(_worldX) {
-  return 0;
-}
-
 function groundAt(worldX) {
   const x = clamp(worldX, 0, world.width);
   const hills = Math.sin(x * 0.0048) * 70;
   const mountains = Math.sin(x * 0.0019 + 0.6) * 110;
   const valleys = Math.sin(x * 0.009 + 1.3) * 26;
-  const dugDepth = getTerrainDigDepth(x);
-  const height = world.baseGround + hills + mountains + valleys + dugDepth;
+  const height = world.baseGround + hills + mountains + valleys;
   return Math.floor(height / BLOCK_SIZE) * BLOCK_SIZE;
 }
 
@@ -1180,17 +1167,6 @@ function updateGroundParticles() {
   }
 }
 
-function digTerrainAt(worldX) {
-  const col = worldToTerrainCol(worldX);
-  const startRow = surfaceRowForCol(col);
-  for (let row = startRow; row < startRow + 18; row += 1) {
-    if (!isTerrainSolidCell(col, row)) continue;
-    removedGroundBlocks.add(terrainKey(col, row));
-    return { col, row };
-  }
-  return null;
-}
-
 function spawnGroundParticles(worldX, worldY) {
   const count = 5;
   for (let i = 0; i < count; i += 1) {
@@ -1327,8 +1303,6 @@ function revealBuriedSite(site) {
     const depthOffset = 36 + Math.random() * 38;
     spawnBuriedTreasure(type, clamp(tx, 0, world.width), depthOffset);
   }
-
-  rebuildPitCellIndex();
 }
 
 function tryRevealBuriedSite(digX) {
@@ -1466,11 +1440,7 @@ function tryDigGround(attackBox) {
     }
   }
 
-  if (!dug) {
-    const fallback = digTerrainAt(attackBox.x + attackBox.w / 2);
-    if (!fallback) return false;
-    dug = fallback;
-  }
+  if (!dug) return false;
 
   const dugX = dug.col * BLOCK_SIZE + BLOCK_SIZE * 0.5;
   const dugY = dug.row * BLOCK_SIZE;
