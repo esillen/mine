@@ -80,14 +80,16 @@ const enemies = [];
 const birds = [];
 const trees = [];
 const droppedApples = [];
+const droppedCoins = [];
 const buriedSites = [];
 const buriedTreasures = [];
 const groundCuts = [];
 const terrainPits = [];
 const groundParticles = [];
 const pitCellIndex = new Map();
-const dugColumns = new Map();
+const removedGroundBlocks = new Set();
 const placedBlocks = [];
+const placedBlockCells = new Set();
 const BLOCK_SIZE = 40;
 let defeated = 0;
 let wood = 50;
@@ -95,6 +97,7 @@ let dirt = 0;
 let emerald = 999;
 let nyx = 999;
 let amethyst = 999;
+let gold = 0;
 let selectedMaterial = "wood";
 let gameOver = false;
 let frameCount = 0;
@@ -107,6 +110,7 @@ const MATERIAL_SLOT_CONFIG = [
   { key: "emerald", label: "Smaragd", future: false },
   { key: "nyx", label: "Nyx", future: false },
   { key: "amethyst", label: "Ametist", future: false },
+  { key: "gold", label: "Guld", future: true },
 ];
 const BUILD_MATERIALS = MATERIAL_SLOT_CONFIG.filter((slot) => !slot.future).map((slot) => slot.key);
 const ui = createUIController({
@@ -128,9 +132,16 @@ function worldToTerrainCol(worldX) {
   return Math.floor(clamp(worldX, 0, world.width) / BLOCK_SIZE);
 }
 
-function getTerrainDigDepth(worldX) {
-  const col = worldToTerrainCol(worldX);
-  return (dugColumns.get(col) || 0) * BLOCK_SIZE;
+function worldToTerrainRow(worldY) {
+  return Math.floor(worldY / BLOCK_SIZE);
+}
+
+function terrainKey(col, row) {
+  return `${col},${row}`;
+}
+
+function getTerrainDigDepth(_worldX) {
+  return 0;
 }
 
 function groundAt(worldX) {
@@ -141,6 +152,49 @@ function groundAt(worldX) {
   const dugDepth = getTerrainDigDepth(x);
   const height = world.baseGround + hills + mountains + valleys + dugDepth;
   return Math.floor(height / BLOCK_SIZE) * BLOCK_SIZE;
+}
+
+function surfaceRowForCol(col) {
+  const centerX = col * BLOCK_SIZE + BLOCK_SIZE * 0.5;
+  return worldToTerrainRow(groundAt(centerX));
+}
+
+function isTerrainSolidCell(col, row) {
+  if (col < 0 || col > Math.floor(world.width / BLOCK_SIZE)) return false;
+  if (row < 0) return false;
+  if (row < surfaceRowForCol(col)) return false;
+  return !removedGroundBlocks.has(terrainKey(col, row));
+}
+
+function isPlacedSolidCell(col, row) {
+  return placedBlockCells.has(terrainKey(col, row));
+}
+
+function isSolidCell(col, row) {
+  return isTerrainSolidCell(col, row) || isPlacedSolidCell(col, row);
+}
+
+function intersectsSolid(x, y, w, h) {
+  const leftCol = worldToTerrainCol(x);
+  const rightCol = worldToTerrainCol(x + w - 1);
+  const topRow = worldToTerrainRow(y);
+  const bottomRow = worldToTerrainRow(y + h - 1);
+
+  for (let col = leftCol; col <= rightCol; col += 1) {
+    for (let row = topRow; row <= bottomRow; row += 1) {
+      if (isSolidCell(col, row)) return true;
+    }
+  }
+  return false;
+}
+
+function rebuildPlacedBlockCells() {
+  placedBlockCells.clear();
+  placedBlocks.forEach((block) => {
+    const col = worldToTerrainCol(block.x);
+    const row = worldToTerrainRow(block.y);
+    placedBlockCells.add(terrainKey(col, row));
+  });
 }
 
 function getDayPhase() {
@@ -412,27 +466,25 @@ function drawTerrain(cameraX, cameraY) {
   const bodyA = isNight() ? "#1f3d24" : "#3f8746";
   const bodyB = isNight() ? "#25452a" : "#4a9250";
 
-  const startWX = Math.floor(cameraX / BLOCK_SIZE) * BLOCK_SIZE - BLOCK_SIZE;
-  const endWX = cameraX + canvas.width + BLOCK_SIZE;
+  const startCol = worldToTerrainCol(cameraX) - 1;
+  const endCol = worldToTerrainCol(cameraX + canvas.width) + 1;
+  const topRow = worldToTerrainRow(cameraY) - 1;
+  const bottomRow = worldToTerrainRow(cameraY + canvas.height) + 1;
 
-  for (let wx = startWX; wx <= endWX; wx += BLOCK_SIZE) {
-    const sx = Math.floor(wx - cameraX);
-    const topBlockY = Math.floor(groundAt(wx) - cameraY);
-    ctx.fillStyle = topColor;
-    ctx.fillRect(sx, topBlockY, BLOCK_SIZE, BLOCK_SIZE);
+  for (let col = startCol; col <= endCol; col += 1) {
+    const surfaceRow = surfaceRowForCol(col);
+    for (let row = Math.max(surfaceRow, topRow); row <= bottomRow; row += 1) {
+      if (!isTerrainSolidCell(col, row)) continue;
 
-    const col = worldToTerrainCol(wx);
-    for (let y = topBlockY + BLOCK_SIZE; y < canvas.height; y += BLOCK_SIZE) {
-      const row = Math.floor((y + cameraY) / BLOCK_SIZE);
+      const sx = col * BLOCK_SIZE - cameraX;
+      const sy = row * BLOCK_SIZE - cameraY;
       const checker = ((col + row) & 1) === 0;
-      ctx.fillStyle = checker ? bodyA : bodyB;
-      ctx.fillRect(sx, y, BLOCK_SIZE, BLOCK_SIZE);
-    }
+      ctx.fillStyle = row === surfaceRow ? topColor : checker ? bodyA : bodyB;
+      ctx.fillRect(sx, sy, BLOCK_SIZE, BLOCK_SIZE);
 
-    ctx.strokeStyle = isNight() ? "rgba(15, 23, 42, 0.35)" : "rgba(30, 64, 45, 0.28)";
-    ctx.lineWidth = 1;
-    for (let y = topBlockY; y < canvas.height; y += BLOCK_SIZE) {
-      ctx.strokeRect(sx, y, BLOCK_SIZE, BLOCK_SIZE);
+      ctx.strokeStyle = isNight() ? "rgba(15, 23, 42, 0.35)" : "rgba(30, 64, 45, 0.28)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(sx, sy, BLOCK_SIZE, BLOCK_SIZE);
     }
   }
 
@@ -610,6 +662,19 @@ function drawDroppedApples(cameraX, cameraY) {
   });
 }
 
+function drawDroppedCoins(cameraX, cameraY) {
+  droppedCoins.forEach((coin) => {
+    const cx = coin.x - cameraX;
+    const cy = coin.y - cameraY;
+    if (cx < -20 || cx > canvas.width + 20) return;
+
+    ctx.fillStyle = "#fbbf24";
+    ctx.fillRect(cx - 4, cy - 4, 8, 8);
+    ctx.fillStyle = "#fef3c7";
+    ctx.fillRect(cx - 2, cy - 2, 4, 4);
+  });
+}
+
 function drawDog(cameraX, cameraY) {
   const dx = dog.x - cameraX;
   const dy = dog.y - cameraY + Math.sin(dog.bouncePhase) * 1.8;
@@ -654,6 +719,15 @@ function drawBuriedTreasures(cameraX, cameraY) {
       ctx.fillRect(tx - 9, ty - 3, 18, 3);
       ctx.fillStyle = "#78350f";
       ctx.fillRect(tx - 2, ty - 2, 4, 4);
+      if (typeof treasure.hp === "number") {
+        const crack = Math.max(0, 3 - treasure.hp);
+        if (crack > 0) {
+          ctx.fillStyle = "#1f2937";
+          for (let i = 0; i < crack; i += 1) {
+            ctx.fillRect(tx - 6 + i * 4, ty - 5 + i, 2, 8);
+          }
+        }
+      }
       return;
     }
 
@@ -956,43 +1030,41 @@ function updatePlayer() {
     player.facing = 1;
   }
 
-  player.x = clamp(player.x + player.vx, 0, world.width - player.w);
-  player.y += player.vy;
   player.vy += world.gravity;
 
-  const centerX = player.x + player.w / 2;
-  const bottomY = player.y + player.h;
-  let surfaceY = groundAt(centerX);
-
-  if (player.vy >= 0) {
-    placedBlocks.forEach((block) => {
-      const withinX = centerX >= block.x && centerX <= block.x + block.size;
-      const comingFromAbove = bottomY - player.vy <= block.y + 8;
-      if (withinX && comingFromAbove) {
-        surfaceY = Math.min(surfaceY, block.y);
+  // Horizontal move with solid block collision.
+  player.x += player.vx;
+  if (intersectsSolid(player.x, player.y, player.w, player.h)) {
+    const dirX = Math.sign(player.vx);
+    if (dirX !== 0) {
+      while (intersectsSolid(player.x, player.y, player.w, player.h)) {
+        player.x -= dirX;
       }
-    });
-
-    trees.forEach((tree) => {
-      if (!tree.alive) return;
-      const crownTop = tree.y - tree.trunkH - tree.crownH + 10;
-      const crownLeft = tree.x - tree.crownW / 2;
-      const crownRight = tree.x + tree.crownW / 2;
-      const withinCrownX = centerX >= crownLeft + 4 && centerX <= crownRight - 4;
-      const comingFromAbove = bottomY - player.vy <= crownTop + 8;
-      if (withinCrownX && comingFromAbove) {
-        surfaceY = Math.min(surfaceY, crownTop);
+    } else {
+      // Fallback nudge if spawned in a solid cell.
+      let safety = 0;
+      while (intersectsSolid(player.x, player.y, player.w, player.h) && safety < BLOCK_SIZE * 2) {
+        player.y -= 1;
+        safety += 1;
       }
-    });
+    }
+    player.vx = 0;
   }
 
-  if (player.y + player.h >= surfaceY) {
-    player.y = surfaceY - player.h;
+  // Vertical move with solid block collision.
+  player.y += player.vy;
+  if (intersectsSolid(player.x, player.y, player.w, player.h)) {
+    const dirY = Math.sign(player.vy) || 1;
+    while (intersectsSolid(player.x, player.y, player.w, player.h)) {
+      player.y -= dirY;
+    }
+    player.onGround = player.vy > 0;
     player.vy = 0;
-    player.onGround = true;
   } else {
     player.onGround = false;
   }
+
+  player.x = clamp(player.x, 0, world.width - player.w);
 
   if (player.attackTimer > 0) player.attackTimer -= 1;
   if (player.hitCooldown > 0) player.hitCooldown -= 1;
@@ -1089,8 +1161,13 @@ function updateGroundParticles() {
 
 function digTerrainAt(worldX) {
   const col = worldToTerrainCol(worldX);
-  const current = dugColumns.get(col) || 0;
-  dugColumns.set(col, Math.min(current + 1, 16));
+  const startRow = surfaceRowForCol(col);
+  for (let row = startRow; row < startRow + 18; row += 1) {
+    if (!isTerrainSolidCell(col, row)) continue;
+    removedGroundBlocks.add(terrainKey(col, row));
+    return { col, row };
+  }
+  return null;
 }
 
 function spawnGroundParticles(worldX, worldY) {
@@ -1145,12 +1222,57 @@ function updateDroppedApples() {
   }
 }
 
+function updateDroppedCoins() {
+  const playerBox = { x: player.x, y: player.y, w: player.w, h: player.h };
+  for (let i = droppedCoins.length - 1; i >= 0; i -= 1) {
+    const coin = droppedCoins[i];
+
+    if (!coin.onGround) {
+      coin.x = clamp(coin.x + coin.vx, 0, world.width);
+      coin.y += coin.vy;
+      coin.vy += world.gravity * 0.58;
+      coin.vx *= 0.987;
+
+      const groundY = groundAt(coin.x) - 4;
+      if (coin.y >= groundY) {
+        coin.y = groundY;
+        coin.vy = 0;
+        coin.vx *= 0.6;
+        if (Math.abs(coin.vx) < 0.12) {
+          coin.vx = 0;
+          coin.onGround = true;
+        }
+      }
+    }
+
+    const coinBox = { x: coin.x - 4, y: coin.y - 4, w: 8, h: 8 };
+    if (intersects(playerBox, coinBox)) {
+      gold += coin.value;
+      droppedCoins.splice(i, 1);
+    }
+  }
+}
+
+function spawnCoinsFromChest(x, y, count) {
+  for (let i = 0; i < count; i += 1) {
+    droppedCoins.push({
+      x: x + (Math.random() - 0.5) * 12,
+      y: y - 4,
+      vx: (Math.random() - 0.5) * 4.2,
+      vy: -3.8 - Math.random() * 2.4,
+      value: 1 + Math.floor(Math.random() * 2),
+      onGround: false,
+    });
+  }
+}
+
 function spawnBuriedTreasure(type, x, depthOffset) {
   buriedTreasures.push({
     type,
     x,
     depthOffset,
     y: groundAt(x) + depthOffset,
+    hp: type === "cache" ? 3 : 1,
     collected: false,
   });
 }
@@ -1164,11 +1286,16 @@ function revealBuriedSite(site) {
   for (let i = 0; i < count; i += 1) {
     const px = start + i * step;
     const col = worldToTerrainCol(px);
-    const extra = 2 + Math.floor(Math.abs(Math.sin(i * 0.85)) * 3) + (i % 2 === 0 ? 1 : 0);
-    const current = dugColumns.get(col) || 0;
-    dugColumns.set(col, Math.min(current + extra, 14));
-    dugColumns.set(col - 1, Math.min((dugColumns.get(col - 1) || 0) + 1, 12));
-    dugColumns.set(col + 1, Math.min((dugColumns.get(col + 1) || 0) + 1, 12));
+    const startRow = surfaceRowForCol(col);
+    const tunnelTop = startRow + 2 + Math.floor(Math.abs(Math.sin(i * 0.85)) * 2);
+    const tunnelHeight = 3 + (i % 2);
+
+    for (let dc = -1; dc <= 1; dc += 1) {
+      const carveCol = col + dc;
+      for (let dr = 0; dr < tunnelHeight; dr += 1) {
+        removedGroundBlocks.add(terrainKey(carveCol, tunnelTop + dr));
+      }
+    }
   }
 
   const treasureTypes = ["emerald", "nyx", "amethyst", "cache"];
@@ -1202,6 +1329,7 @@ function updateBuriedTreasures() {
   for (let i = buriedTreasures.length - 1; i >= 0; i -= 1) {
     const t = buriedTreasures[i];
     if (t.collected) continue;
+    if (t.type === "cache") continue;
     const box = { x: t.x - 8, y: t.y - 8, w: 16, h: 16 };
     if (!intersects(playerBox, box)) continue;
 
@@ -1219,6 +1347,25 @@ function updateBuriedTreasures() {
     t.collected = true;
     buriedTreasures.splice(i, 1);
   }
+}
+
+function tryHitTreasureChest(attackBox) {
+  for (let i = buriedTreasures.length - 1; i >= 0; i -= 1) {
+    const t = buriedTreasures[i];
+    if (t.collected || t.type !== "cache") continue;
+    const chestBox = { x: t.x - 10, y: t.y - 8, w: 20, h: 16 };
+    if (!intersects(attackBox, chestBox)) continue;
+
+    t.hp -= 1;
+    if (t.hp <= 0) {
+      t.collected = true;
+      const coinCount = 8 + Math.floor(Math.random() * 8);
+      spawnCoinsFromChest(t.x, t.y, coinCount);
+      buriedTreasures.splice(i, 1);
+    }
+    return true;
+  }
+  return false;
 }
 
 function updateBirds() {
@@ -1284,17 +1431,33 @@ function tryChopTree(attackBox) {
 }
 
 function tryDigGround(attackBox) {
-  const attackX = attackBox.x + attackBox.w / 2;
-  const groundYBeforeDig = groundAt(attackX);
-  const isCloseToGround = attackBox.y + attackBox.h >= groundYBeforeDig - 10;
-  if (!isCloseToGround) return false;
+  const leftCol = worldToTerrainCol(attackBox.x);
+  const rightCol = worldToTerrainCol(attackBox.x + attackBox.w - 1);
+  const topRow = worldToTerrainRow(attackBox.y);
+  const bottomRow = worldToTerrainRow(attackBox.y + attackBox.h - 1);
 
+  let dug = null;
+  for (let row = topRow; row <= bottomRow && !dug; row += 1) {
+    for (let col = leftCol; col <= rightCol && !dug; col += 1) {
+      if (!isTerrainSolidCell(col, row)) continue;
+      removedGroundBlocks.add(terrainKey(col, row));
+      dug = { col, row };
+    }
+  }
+
+  if (!dug) {
+    const fallback = digTerrainAt(attackBox.x + attackBox.w / 2);
+    if (!fallback) return false;
+    dug = fallback;
+  }
+
+  const dugX = dug.col * BLOCK_SIZE + BLOCK_SIZE * 0.5;
+  const dugY = dug.row * BLOCK_SIZE;
   dirt += 1;
-  digTerrainAt(attackX);
-  tryRevealBuriedSite(attackX);
-  spawnGroundParticles(attackX, groundYBeforeDig);
+  tryRevealBuriedSite(dugX);
+  spawnGroundParticles(dugX, dugY);
   groundCuts.push({
-    x: clamp(attackX, 0, world.width),
+    x: clamp(dugX, 0, world.width),
     size: 22,
     ttl: 900,
   });
@@ -1313,6 +1476,7 @@ function tryBreakPlacedBlock(attackBox) {
     if (!intersects(attackBox, blockBox)) continue;
 
     placedBlocks.splice(i, 1);
+    placedBlockCells.delete(terrainKey(worldToTerrainCol(block.x), worldToTerrainRow(block.y)));
     if (block.material === "wood") wood += 1;
     else if (block.material === "dirt") dirt += 1;
     else if (block.material === "emerald") emerald += 1;
@@ -1372,6 +1536,9 @@ function attack() {
   const brokeBlock = tryBreakPlacedBlock(attackBox);
   if (brokeBlock) return;
 
+  const hitChest = tryHitTreasureChest(attackBox);
+  if (hitChest) return;
+
   const choppedTree = tryChopTree(attackBox);
   if (!choppedTree) {
     tryDigGround(attackBox);
@@ -1416,10 +1583,9 @@ function placeBlock() {
   ];
 
   for (const pos of candidates) {
-    const overlapsExisting = placedBlocks.some(
-      (block) => block.x === pos.x && block.y === pos.y
-    );
-    if (overlapsExisting) continue;
+    const col = worldToTerrainCol(pos.x);
+    const row = worldToTerrainRow(pos.y);
+    if (placedBlockCells.has(terrainKey(col, row))) continue;
 
     placedBlocks.push({
       x: pos.x,
@@ -1427,6 +1593,7 @@ function placeBlock() {
       size: BLOCK_SIZE,
       material: selectedMaterial,
     });
+    placedBlockCells.add(terrainKey(col, row));
     saveBuildState(placedBlocks);
     return;
   }
@@ -1535,6 +1702,7 @@ function gameLoop() {
   updateGroundCuts();
   updateGroundParticles();
   updateDroppedApples();
+  updateDroppedCoins();
   updateBirds();
   updateBuriedTreasures();
   updateCamera();
@@ -1547,6 +1715,7 @@ function gameLoop() {
   drawPlacedBlocks(renderCameraX, renderCameraY);
   drawTrees(renderCameraX, renderCameraY);
   drawDroppedApples(renderCameraX, renderCameraY);
+  drawDroppedCoins(renderCameraX, renderCameraY);
   drawBuriedTreasures(renderCameraX, renderCameraY);
   drawDog(renderCameraX, renderCameraY);
   drawPlayer(renderCameraX, renderCameraY);
@@ -1556,7 +1725,7 @@ function gameLoop() {
     hp: player.hp,
     isNight: isNight(),
     selectedMaterial,
-    materials: { wood, dirt, emerald, nyx, amethyst },
+    materials: { wood, dirt, emerald, nyx, amethyst, gold },
   });
 
   requestAnimationFrame(gameLoop);
@@ -1601,6 +1770,7 @@ placedBlocks.push(
     buildMaterials: BUILD_MATERIALS,
   })
 );
+rebuildPlacedBlockCells();
 ui.setup();
 ui.bindInfoToggle();
 gameLoop();
